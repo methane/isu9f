@@ -1536,7 +1536,11 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 		payment_api = "http://payment:5000"
 	}
 
-	resp, err := http.Post(payment_api+"/payment", "application/json", bytes.NewBuffer(j))
+	preq, err := http.NewRequestWithContext(r.Context(), "POST", payment_api+"/payment", bytes.NewBuffer(j))
+	if err != nil {
+		log.Panic(err)
+	}
+	resp, err := http.DefaultClient.Do(preq)
 	if err != nil {
 		tx.Rollback()
 		errorResponse(w, resp.StatusCode, "HTTP POSTに失敗しました")
@@ -1901,8 +1905,8 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			payment_api = "http://payment:5000"
 		}
 
-		client := &http.Client{Timeout: time.Duration(10) * time.Second}
-		req, err := http.NewRequest("DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
+		client := http.DefaultClient
+		req, err := http.NewRequestWithContext(r.Context(), "DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
 		if err != nil {
 			tx.Rollback()
 			errorResponse(w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
