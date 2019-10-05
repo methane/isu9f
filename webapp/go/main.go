@@ -373,7 +373,6 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 	if err != nil {
 		return 0, err
 	}
-	log.Println("distFare", distFare)
 
 	// 期間・車両・座席クラス倍率
 	fareList := []Fare{}
@@ -391,12 +390,9 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	for _, fare := range fareList {
 		if !date.Before(fare.StartDate) {
-			log.Println(fare.StartDate, fare.FareMultiplier)
 			selectedFare = fare
 		}
 	}
-
-	log.Println("%%%%%%%%%%%%%%%%%%%")
 
 	return int(float64(distFare) * selectedFare.FareMultiplier), nil
 }
