@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"time"
 )
 
 var stationMaster = []Station{
@@ -91,21 +92,43 @@ var stationMaster = []Station{
 
 var (
 	stationMasterByName = make(map[string]Station)
-	stationMasterByID = make(map[int]Station)
+	stationMasterByID   = make(map[int]Station)
 
 	stationsNobori = make([]Station, len(stationMaster))
+
+	// [Date][Class(0:最速,1:中間,2:遅いやつ)][]
+	trainMaster  = make(map[string][][]Train)
+	trainClassID = map[string]int{"最速": 0, "中間": 1, "遅いやつ": 2}
 )
 
-func init(){
+func init() {
 	for _, s := range stationMaster {
 		stationMasterByName[s.Name] = s
 		stationMasterByID[s.ID] = s
 	}
 
 	copy(stationsNobori, stationMaster)
-	sort.Slice(stationsNobori, func(a, b int)bool{
+	sort.Slice(stationsNobori, func(a, b int) bool {
 		return stationsNobori[a].Distance > stationsNobori[b].Distance
 	})
+}
+
+func initTrainMaster() {
+	var trains []Train
+	dbx.Select(&trains, "select * from train_master")
+
+	for _, t := range trains {
+		date := t.Date.Format("2006/01/02")
+		if _, ok := trainMaster[date]; !ok {
+			trainMaster[date] = make([][]Train, 3)
+			trainMaster[date][0] = make([]Train, 0)
+			trainMaster[date][1] = make([]Train, 0)
+			trainMaster[date][2] = make([]Train, 0)
+		}
+		c := trainClassID[t.TrainClass]
+		t.TrainClassID = c
+		trainMaster[date][c] = append(trainMaster[date][c], t)
+	}
 }
 
 func stationsOrderByDistance(isNobori bool) []Station {
@@ -113,4 +136,27 @@ func stationsOrderByDistance(isNobori bool) []Station {
 		return stationsNobori
 	}
 	return stationMaster
+}
+
+func SelectTrainMaster(date time.Time, classIDs []int, isNobori bool) []Train {
+	d := date.Format("2006/01/02")
+	ret := make([]Train, 0)
+	for _, c := range classIDs {
+		for _, t := range trainMaster[d][c] {
+			if t.IsNobori == isNobori {
+				ret = append(ret, t)
+			}
+		}
+	}
+	return ret
+}
+
+func SelectTrainMasterByName(date time.Time, classID int, name string) (Train, bool) {
+	d := date.Format("2006/01/02")
+	for _, t := range trainMaster[d][classID] {
+		if t.TrainName == name {
+			return t, true
+		}
+	}
+	return Train{}, false
 }
