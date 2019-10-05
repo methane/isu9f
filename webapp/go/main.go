@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
@@ -720,13 +721,17 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	seatList := []Seat{}
-
-	query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? ORDER BY seat_row, seat_column"
-	err = dbx.SelectContext(r.Context(), &seatList, query, trainClass, carNumber)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
-		return
+	for _, s := range seatMaster[trainClassID[trainClass]] {
+		if s.CarNumber == carNumber {
+			seatList = append(seatList, s)
+		}
 	}
+	sort.Slice(seatList, func(i, j int) bool {
+		if ri, rj := seatList[i].SeatRow, seatList[j].SeatRow; ri != rj {
+			return ri < rj
+		}
+		return seatList[i].SeatColumn < seatList[j].SeatColumn
+	})
 
 	var seatInformationList []SeatInformation
 
@@ -825,12 +830,24 @@ WHERE
 	// 各号車の情報
 
 	simpleCarInformationList := []SimpleCarInformation{}
-	seat := Seat{}
-	query = "SELECT * FROM seat_master WHERE train_class=? AND car_number=? ORDER BY seat_row, seat_column LIMIT 1"
+	seats := make(map[int]Seat)
+	for _, s := range seatMaster[trainClassID[trainClass]] {
+		carnum := s.CarNumber
+		if ss, ok := seats[carnum]; ok {
+			if s.SeatRow < ss.SeatRow {
+				seats[carnum] = s
+			} else if s.SeatRow==ss.SeatRow && s.SeatColumn < ss.SeatColumn {
+				seats[carnum] = s
+			}
+		} else {
+			seats[carnum] = s
+		}
+	}
+
 	i := 1
 	for {
-		err = dbx.GetContext(r.Context(), &seat, query, trainClass, i)
-		if err != nil {
+		seat, ok := seats[i]
+		if !ok {
 			break
 		}
 		simpleCarInformationList = append(simpleCarInformationList, SimpleCarInformation{i, seat.SeatClass})
@@ -1015,14 +1032,15 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var query string
+
 		req.Seats = []RequestSeat{} // 座席リクエスト情報は空に
 		for carnum := 1; carnum <= 16; carnum++ {
 			seatList := []Seat{}
-			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_class=? AND is_smoking_seat=? ORDER BY seat_row, seat_column"
-			err = dbx.SelectContext(r.Context(), &seatList, query, req.TrainClass, carnum, req.SeatClass, req.IsSmokingSeat)
-			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
-				return
+			for _, s := range seatMaster[trainClassID[req.TrainClass]] {
+				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat==req.IsSmokingSeat {
+					seatList = append(seatList, s)
+				}
 			}
 
 			var seatInformationList []SeatInformation
@@ -1146,6 +1164,24 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// 座席情報のValidate
 		seatList := Seat{}
+MASTERLOOP:
+		for _, master := range seatMaster[trainClassID[req.TrainClass]] {
+			if master.CarNumber != req.CarNumber || master.SeatClass != req.SeatClass {
+				continue
+			}
+			for _, z := range req.Seats {
+				if z.Column == master.SeatColumn && z.Row == master.SeatRow {
+					seatList = master
+					break MASTERLOOP
+				}
+			}
+		}
+		if seatList.CarNumber == 0 {
+			errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
+			log.Println("seat not found!!")
+			return
+		}
+/*
 		for _, z := range req.Seats {
 			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
 			err = dbx.GetContext(r.Context(),
@@ -1162,6 +1198,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+*/
 		break
 	}
 
@@ -1695,14 +1732,15 @@ func makeReservationResponse(ctx context.Context, reservation Reservation) (Rese
 	} else {
 		// 座席種別を取得
 		seat := Seat{}
-		query = "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=?"
-		err = dbx.GetContext(ctx,
-			&seat, query,
-			reservation.TrainClass, reservationResponse.CarNumber,
-			reservationResponse.Seats[0].SeatColumn, reservationResponse.Seats[0].SeatRow,
-		)
-		if err == sql.ErrNoRows {
-			return reservationResponse, err
+		err := fmt.Errorf("seat not found")
+		for _, s := range seatMaster[trainClassID[reservation.TrainClass]] {
+			if s.CarNumber == reservationResponse.CarNumber &&
+				s.SeatColumn == reservationResponse.Seats[0].SeatColumn &&
+				s.SeatRow == reservationResponse.Seats[0].SeatRow {
+				seat = s
+				err = nil
+				break
+			}
 		}
 		if err != nil {
 			return reservationResponse, err
