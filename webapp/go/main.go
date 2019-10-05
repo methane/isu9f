@@ -796,39 +796,12 @@ WHERE
 			return
 		}
 
-		resvIDs := []int{}
-		{
-			mResvIDs := make(map[int]bool)
-			for _, sr := range seatReservationList {
-				if !mResvIDs[sr.ReservationId] {
-					mResvIDs[sr.ReservationId] = true
-					resvIDs = append(resvIDs, sr.ReservationId)
-				}
-			}
-		}
-
-		resvMap := make(map[int]Reservation)
-		if len(resvIDs) > 0 {
-			query := "SELECT * FROM reservations WHERE reservation_id IN (?)"
-			query, params, err := sqlx.In(query, resvIDs)
-			if err != nil {
-				log.Panic(err)
-			}
-
-			resvs := []Reservation{}
-			err = dbx.SelectContext(r.Context(), &resvs, query, params...)
-			if err != nil {
-				log.Panic(err)
-			}
-
-			for _, r := range resvs {
-				r.fillStationByID()
-				resvMap[r.ReservationId] = r
-			}
-		}
-
 		for _, seatReservation := range seatReservationList {
-			reservation := resvMap[seatReservation.ReservationId]
+			reservation, ok := getReservation(seatReservation.ReservationId)
+			if !ok {
+				log.Printf("resv not found: %v", seatReservation.ReservationId)
+				continue
+			}
 
 			var departureStation, arrivalStation Station
 			departureStation = stationMasterByName[reservation.Departure]
@@ -1626,6 +1599,14 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tx.Commit()
+
+	resv, ok := getReservation(int(req.ReservationId))
+	if ok {
+		resv.Status = "done"
+		resv.PaymentId = output.PaymentId
+	}
+	insertReservation(resv)
+
 	w.Write(response)
 }
 
