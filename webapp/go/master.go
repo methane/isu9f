@@ -99,6 +99,8 @@ var (
 	// [Date][Class(0:最速,1:中間,2:遅いやつ)][]
 	trainMaster  = make(map[string][][]Train)
 	trainClassID = map[string]int{"最速": 0, "中間": 1, "遅いやつ": 2}
+
+	seatMaster = make(map[int][]Seat)
 )
 
 func init() {
@@ -128,6 +130,16 @@ func initTrainMaster() {
 		c := trainClassID[t.TrainClass]
 		t.TrainClassID = c
 		trainMaster[date][c] = append(trainMaster[date][c], t)
+	}
+}
+
+func initSeatMaster() {
+	var seats []Seat
+	dbx.Select(&seats, "SELECT * FROM seat_master")
+
+	for _, s := range seats {
+		tc := trainClassID[s.TrainClass]
+		seatMaster[tc] = append(seatMaster[tc], s)
 	}
 }
 

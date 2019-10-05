@@ -61,19 +61,13 @@ func getUsableTrainClassList(fromStation Station, toStation Station) []string {
 	return ret
 }
 
-func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, toStation Station, seatClass string, isSmokingSeat bool) ([]Seat, error) {
+func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, toStation Station) ([]Seat, error) {
 	// 指定種別の空き座席を返す
 
 	var err error
 
 	// 全ての座席を取得する
-	query := "SELECT * FROM seat_master WHERE train_class=? AND seat_class=? AND is_smoking_seat=?"
-
-	seatList := []Seat{}
-	err = dbx.SelectContext(ctx, &seatList, query, train.TrainClass, seatClass, isSmokingSeat)
-	if err != nil {
-		return nil, err
-	}
+	seatList := seatMaster[train.TrainClassID]
 
 	availableSeatMap := map[string]Seat{}
 	for _, seat := range seatList {
@@ -81,7 +75,7 @@ func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, t
 	}
 
 	// すでに取られている予約を取得する
-	query = `
+	query := `
 	SELECT sr.reservation_id, sr.car_number, sr.seat_row, sr.seat_column
 	FROM seat_reservations sr, reservations r, seat_master s
 	WHERE
@@ -109,7 +103,7 @@ func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, t
 		delete(availableSeatMap, key)
 	}
 
-	ret := []Seat{}
+	ret := make([]Seat, 0, len(availableSeatMap))
 	for _, seat := range availableSeatMap {
 		ret = append(ret, seat)
 	}

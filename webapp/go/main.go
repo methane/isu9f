@@ -547,26 +547,30 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			premium_avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation, "premium", false)
+			avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation)
 			if err != nil {
 				errorResponse(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			premium_smoke_avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation, "premium", true)
-			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
-				return
-			}
-
-			reserved_avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation, "reserved", false)
-			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			reserved_smoke_avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation, "reserved", true)
-			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
-				return
+			var premium_avail_seats []Seat
+			var premium_smoke_avail_seats []Seat
+			var reserved_avail_seats []Seat
+			var reserved_smoke_avail_seats []Seat
+			for _, s := range avail_seats {
+				switch s.SeatClass {
+				case "premium":
+					if s.IsSmokingSeat {
+						premium_smoke_avail_seats = append(premium_smoke_avail_seats, s)
+					} else {
+						premium_avail_seats = append(premium_avail_seats, s)
+					}
+				case "reserved":
+					if s.IsSmokingSeat {
+						reserved_smoke_avail_seats = append(reserved_smoke_avail_seats, s)
+					} else {
+						reserved_avail_seats = append(reserved_avail_seats, s)
+					}
+				}
 			}
 
 			premium_avail := "○"
@@ -2019,6 +2023,7 @@ func main() {
 	}
 
 	initTrainMaster()
+	initSeatMaster()
 
 	// HTTP
 
