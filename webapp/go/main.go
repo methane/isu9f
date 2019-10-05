@@ -2074,16 +2074,21 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("initializeHandler")
 	/*
 		initialize
 	*/
 
+	log.Println("truncating...")
 	dbx.Exec("TRUNCATE seat_reservations")
 	dbx.Exec("TRUNCATE reservations")
 	dbx.Exec("TRUNCATE users")
 
-	callOnStartProfile() // TODO: 最後に外す
+	// TODO: 最後に外す
+	log.Println("initialize profiler")
+	StartProfile(time.Minute)
 
+	log.Println("done")
 	resp := InitializeResponse{
 		availableDays,
 		"golang",
@@ -2149,7 +2154,7 @@ func main() {
 		dbname,
 	)
 
-	dbx, err = sqlx.Open("mysql", tracedDriver(dsn))
+	dbx, err = sqlx.Open(tracedDriver("mysql"), dsn)
 	if err != nil {
 		log.Fatalf("failed to connect to DB: %s.", err.Error())
 	}
@@ -2157,6 +2162,15 @@ func main() {
 	dbx.SetMaxOpenConns(64)
 	dbx.SetMaxIdleConns(64)
 	dbx.SetConnMaxLifetime(time.Minute * 3)
+
+	for {
+		_, err := dbx.Exec("select 42")
+		if err != nil {
+			log.Println(err)
+			time.Sleep(time.Second)
+		}
+		break
+	}
 
 	// HTTP
 
