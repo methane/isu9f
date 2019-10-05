@@ -354,7 +354,6 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 	var fromStation, toStation Station
 	var ok bool
 
-
 	if fromStation, ok = stationMasterByID[depStation]; !ok {
 		err = fmt.Errorf("depStation(%v) not found", depStation)
 	}
@@ -778,15 +777,38 @@ WHERE
 			return
 		}
 
-		fmt.Println(seatReservationList)
+		resvIDs := []int{}
+		{
+			mResvIDs := make(map[int]bool)
+			for _, sr := range seatReservationList {
+				if !mResvIDs[sr.ReservationId] {
+					mResvIDs[sr.ReservationId] = true
+					resvIDs = append(resvIDs, sr.ReservationId)
+				}
+			}
+		}
+
+		resvMap := make(map[int]Reservation)
+		if len(resvIDs) > 0 {
+			query := "SELECT * FROM reservations WHERE reservation_id IN (?)"
+			query, params, err := sqlx.In(query, resvIDs)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			resvs := []Reservation{}
+			err = dbx.SelectContext(r.Context(), &resvs, query, params...)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			for _, r := range resvs {
+				resvMap[r.ReservationId] = r
+			}
+		}
 
 		for _, seatReservation := range seatReservationList {
-			reservation := Reservation{}
-			query = "SELECT * FROM reservations WHERE reservation_id=?"
-			err = dbx.GetContext(r.Context(), &reservation, query, seatReservation.ReservationId)
-			if err != nil {
-				panic(err)
-			}
+			reservation := resvMap[seatReservation.ReservationId]
 
 			var departureStation, arrivalStation Station
 			departureStation = stationMasterByName[reservation.Departure]
@@ -904,7 +926,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	// 列車データを取得
 	tmas := Train{}
 	query := "SELECT * FROM train_master WHERE date=? AND train_class=? AND train_name=?"
-	err = tx.Get(
+	err = tx.GetContext(r.Context(),
 		&tmas, query,
 		date.Format("2006/01/02"),
 		req.TrainClass,
@@ -1205,7 +1227,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	// 当該列車・列車名の予約一覧取得
 	reservations := []Reservation{}
 	query = "SELECT * FROM reservations WHERE date=? AND train_class=? AND train_name=? FOR UPDATE"
-	err = tx.Select(
+	err = tx.SelectContext(r.Context(),
 		&reservations, query,
 		date.Format("2006/01/02"),
 		req.TrainClass,
@@ -1225,7 +1247,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		// train_masterから列車情報を取得(上り・下りが分かる)
 		tmas = Train{}
 		query = "SELECT * FROM train_master WHERE date=? AND train_class=? AND train_name=?"
-		err = tx.Get(
+		err = tx.GetContext(r.Context(),
 			&tmas, query,
 			date.Format("2006/01/02"),
 			req.TrainClass,
@@ -1291,7 +1313,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			// 区間重複の場合は更に座席の重複をチェックする
 			SeatReservations := []SeatReservation{}
 			query := "SELECT * FROM seat_reservations WHERE reservation_id=? FOR UPDATE"
-			err = tx.Select(
+			err = tx.SelectContext(r.Context(),
 				&SeatReservations, query,
 				reservation.ReservationId,
 			)
@@ -1465,7 +1487,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	// 予約IDで検索
 	reservation := Reservation{}
 	query := "SELECT * FROM reservations WHERE reservation_id=?"
-	err = tx.Get(
+	err = tx.GetContext(r.Context(),
 		&reservation, query,
 		req.ReservationId,
 	)
@@ -1854,7 +1876,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 
 	reservation := Reservation{}
 	query := "SELECT * FROM reservations WHERE reservation_id=? AND user_id=?"
-	err = tx.Get(&reservation, query, itemID, user.ID)
+	err = tx.GetContext(r.Context(), &reservation, query, itemID, user.ID)
 	fmt.Println("CANCEL", reservation, itemID, user.ID)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
