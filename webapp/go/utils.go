@@ -77,13 +77,9 @@ func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, t
 	// すでに取られている予約を取得する
 	query := `
 	SELECT sr.reservation_id, sr.car_number, sr.seat_row, sr.seat_column
-	FROM seat_reservations sr, reservations r, seat_master s
+	FROM seat_reservations sr, reservations r
 	WHERE
-		r.reservation_id=sr.reservation_id AND
-		s.train_class=r.train_class AND
-		s.car_number=sr.car_number AND
-		s.seat_column=sr.seat_column AND
-		s.seat_row=sr.seat_row
+		r.reservation_id=sr.reservation_id AND r.train_class = ?
 	`
 
 	if train.IsNobori {
@@ -93,7 +89,7 @@ func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, t
 	}
 
 	seatReservationList := []SeatReservation{}
-	err = dbx.SelectContext(ctx, &seatReservationList, query, fromStation.ID, fromStation.ID, toStation.ID, toStation.ID, fromStation.ID, toStation.ID)
+	err = dbx.SelectContext(ctx, &seatReservationList, query, train.TrainClass, fromStation.ID, fromStation.ID, toStation.ID, toStation.ID, fromStation.ID, toStation.ID)
 	if err != nil {
 		return nil, err
 	}
