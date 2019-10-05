@@ -81,14 +81,24 @@ type Reservation struct {
 	Date          *time.Time `json:"date" db:"date"`
 	TrainClass    string     `json:"train_class" db:"train_class"`
 	TrainName     string     `json:"train_name" db:"train_name"`
-	Departure     string     `json:"departure" db:"departure"`
-	Arrival       string     `json:"arrival" db:"arrival"`
+	DepartureID   int        `json:"-" db:"departure"`
+	Departure     string     `json:"departure" db:"-"`
+	ArrivalID     int        `json:"-" db:"arrival"`
+	Arrival       string     `json:"arrival" db:"-"`
 	PaymentStatus string     `json:"payment_status" db:"payment_status"`
 	Status        string     `json:"status" db:"status"`
 	PaymentId     string     `json:"payment_id,omitempty" db:"payment_id"`
 	Adult         int        `json:"adult" db:"adult"`
 	Child         int        `json:"child" db:"child"`
 	Amount        int        `json:"amount" db:"amount"`
+}
+
+func (r *Reservation) fillStationByID() {
+	if r.Departure == "" && r.DepartureID > 0 {
+		log.Println(r)
+		r.Departure = stationMasterByID[r.DepartureID].Name
+		r.Arrival = stationMasterByID[r.ArrivalID].Name
+	}
 }
 
 type SeatReservation struct {
@@ -326,8 +336,7 @@ func getDistanceFare(ctx context.Context, origToDestDistance float64) (int, erro
 	lastDistance := 0.0
 	lastFare := 0
 	for _, distanceFare := range distanceFareMaster {
-
-		fmt.Println(origToDestDistance, distanceFare.Distance, distanceFare.Fare)
+		//log.Println(origToDestDistance, distanceFare.Distance, distanceFare.Fare)
 		if float64(lastDistance) < origToDestDistance && origToDestDistance < float64(distanceFare.Distance) {
 			break
 		}
@@ -359,12 +368,12 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 		return 0, err
 	}
 
-	fmt.Println("distance", math.Abs(toStation.Distance-fromStation.Distance))
+	log.Println("distance", math.Abs(toStation.Distance-fromStation.Distance))
 	distFare, err := getDistanceFare(ctx, math.Abs(toStation.Distance-fromStation.Distance))
 	if err != nil {
 		return 0, err
 	}
-	fmt.Println("distFare", distFare)
+	log.Println("distFare", distFare)
 
 	// 期間・車両・座席クラス倍率
 	fareList := []Fare{}
@@ -382,12 +391,12 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	for _, fare := range fareList {
 		if !date.Before(fare.StartDate) {
-			fmt.Println(fare.StartDate, fare.FareMultiplier)
+			log.Println(fare.StartDate, fare.FareMultiplier)
 			selectedFare = fare
 		}
 	}
 
-	fmt.Println("%%%%%%%%%%%%%%%%%%%")
+	log.Println("%%%%%%%%%%%%%%%%%%%")
 
 	return int(float64(distFare) * selectedFare.FareMultiplier), nil
 }
@@ -469,8 +478,8 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	stations := stationsOrderByDistance(isNobori)
 
-	fmt.Println("From", fromStation)
-	fmt.Println("To", toStation)
+	log.Println("From", fromStation)
+	log.Println("To", toStation)
 
 	trainSearchResponseList := []TrainSearchResponse{}
 
@@ -503,7 +512,7 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				} else {
 					// 出発駅より先に終点が見つかったとき
-					fmt.Println("なんかおかしい")
+					log.Println("なんかおかしい")
 					break
 				}
 			}
@@ -776,6 +785,7 @@ WHERE
 			}
 
 			for _, r := range resvs {
+				r.fillStationByID()
 				resvMap[r.ReservationId] = r
 			}
 		}
@@ -811,7 +821,6 @@ WHERE
 			}
 		}
 
-		fmt.Println(s.IsOccupied)
 		seatInformationList = append(seatInformationList, s)
 	}
 
@@ -1133,19 +1142,19 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			if len(req.Seats) < req.Adult+req.Child {
 				// リクエストに対して席数が足りてない
 				// 次の号車にうつしたい
-				fmt.Println("-----------------")
-				fmt.Printf("現在検索中の車両: %d号車, リクエスト座席数: %d, 予約できそうな座席数: %d, 不足数: %d\n", carnum, req.Adult+req.Child, len(req.Seats), req.Adult+req.Child-len(req.Seats))
-				fmt.Println("リクエストに対して座席数が不足しているため、次の車両を検索します。")
+				log.Println("-----------------")
+				log.Printf("現在検索中の車両: %d号車, リクエスト座席数: %d, 予約できそうな座席数: %d, 不足数: %d\n", carnum, req.Adult+req.Child, len(req.Seats), req.Adult+req.Child-len(req.Seats))
+				log.Println("リクエストに対して座席数が不足しているため、次の車両を検索します。")
 				req.Seats = []RequestSeat{}
 				if carnum == 16 {
-					fmt.Println("この新幹線にまとめて予約できる席数がなかったから検索をやめるよ")
+					log.Println("この新幹線にまとめて予約できる席数がなかったから検索をやめるよ")
 					req.Seats = []RequestSeat{}
 					break
 				}
 			}
-			fmt.Printf("空き実績: %d号車 シート:%v 席数:%d\n", carnum, req.Seats, len(req.Seats))
+			log.Printf("空き実績: %d号車 シート:%v 席数:%d\n", carnum, req.Seats, len(req.Seats))
 			if len(req.Seats) >= req.Adult+req.Child {
-				fmt.Println("予約情報に追加したよ")
+				log.Println("予約情報に追加したよ")
 				req.Seats = req.Seats[:req.Adult+req.Child]
 				req.CarNumber = carnum
 				break
@@ -1160,7 +1169,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		// 座席情報のValidate
 		seatList := Seat{}
 		for _, z := range req.Seats {
-			fmt.Println("XXXX", z)
+			log.Println("XXXX", z)
 			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
 			err = dbx.GetContext(r.Context(),
 				&seatList, query,
@@ -1200,6 +1209,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		if req.SeatClass == "non-reserved" {
 			break
 		}
+		reservation.fillStationByID()
 		// train_masterから列車情報を取得(上り・下りが分かる)
 		tmas, ok := SelectTrainMasterByName(date, trainClassID[req.TrainClass], req.TrainName)
 		if !ok {
@@ -1271,7 +1281,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 				for _, seat := range req.Seats {
 					if v.CarNumber == req.CarNumber && v.SeatRow == seat.Row && v.SeatColumn == seat.Column {
 						tx.Rollback()
-						fmt.Println("Duplicated ", reservation)
+						log.Println("Duplicated ", reservation)
 						errorResponse(w, http.StatusBadRequest, "リクエストに既に予約された席が含まれています")
 						return
 					}
@@ -1326,7 +1336,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sumFare := (req.Adult * fare) + (req.Child*fare)/2
-	fmt.Println("SUMFARE")
+	log.Println("SUMFARE")
 
 	// userID取得。ログインしてないと怒られる。
 	user, errCode, errMsg := getUser(r)
@@ -1345,8 +1355,8 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		date.Format("2006/01/02"),
 		req.TrainClass,
 		req.TrainName,
-		req.Departure,
-		req.Arrival,
+		stationMasterByName[req.Departure].ID,
+		stationMasterByName[req.Arrival].ID,
 		"requesting",
 		"a",
 		req.Adult,
@@ -1359,7 +1369,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err.Error())
 		return
 	}
-
 	id, err := result.LastInsertId() //予約ID
 	if err != nil {
 		tx.Rollback()
@@ -1367,6 +1376,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err.Error())
 		return
 	}
+	log.Printf("insert reservations: user_id=%v, resv_id=%v", user.ID, id)
 
 	//席の予約情報登録
 	//reservationsレコード1に対してseat_reservationstが1以上登録される
@@ -1666,6 +1676,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 func makeReservationResponse(ctx context.Context, reservation Reservation) (ReservationResponse, error) {
 
 	reservationResponse := ReservationResponse{}
+	reservation.fillStationByID()
 
 	var departure, arrival string
 	err := dbx.GetContext(ctx,
@@ -1748,6 +1759,7 @@ func userReservationsHandler(w http.ResponseWriter, r *http.Request) {
 	query := "SELECT * FROM reservations WHERE user_id=?"
 	err := dbx.SelectContext(ctx, &reservationList, query, user.ID)
 	if err != nil {
+		log.Printf("reservation not found: user_id=%v", user.ID)
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1755,6 +1767,8 @@ func userReservationsHandler(w http.ResponseWriter, r *http.Request) {
 	reservationResponseList := []ReservationResponse{}
 
 	for _, r := range reservationList {
+		r.fillStationByID()
+		//log.Printf(" resv: %+v", r)
 		res, err := makeReservationResponse(ctx, r)
 		if err != nil {
 			errorResponse(w, http.StatusBadRequest, err.Error())
@@ -1786,6 +1800,7 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	query := "SELECT * FROM reservations WHERE reservation_id=? AND user_id=?"
 	err = dbx.GetContext(ctx, &reservation, query, itemID, user.ID)
 	if err == sql.ErrNoRows {
+		log.Printf("resv not found: user_id=%v id=%v", user.ID, itemID)
 		errorResponse(w, http.StatusNotFound, "Reservation not found")
 		return
 	}
@@ -1793,7 +1808,8 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
+	reservation.fillStationByID()
+	//log.Printf("resv found: %+v", reservation)
 	reservationResponse, err := makeReservationResponse(ctx, reservation)
 
 	if err != nil {
@@ -1824,7 +1840,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	reservation := Reservation{}
 	query := "SELECT * FROM reservations WHERE reservation_id=? AND user_id=?"
 	err = tx.GetContext(r.Context(), &reservation, query, itemID, user.ID)
-	fmt.Println("CANCEL", reservation, itemID, user.ID)
+	log.Println("CANCEL", reservation, itemID, user.ID)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
 		errorResponse(w, http.StatusBadRequest, "reservations naiyo")
@@ -1897,7 +1913,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(err.Error())
 			return
 		}
-		fmt.Println(output)
+		log.Println(output)
 	default:
 		// pass(requesting状態のものはpayment_id無いので叩かない)
 	}
@@ -2052,7 +2068,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/api/user/reservations/:item_id"), userReservationResponseHandler)
 	mux.HandleFunc(pat.Post("/api/user/reservations/:item_id/cancel"), userReservationCancelHandler)
 
-	//fmt.Println(banner)
+	//log.Println(banner)
 	err = http.ListenAndServe(":8000", withTrace(mux))
 
 	log.Fatal(err)

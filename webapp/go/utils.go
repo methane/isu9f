@@ -83,21 +83,19 @@ func (train Train) getAvailableSeats(ctx context.Context, fromStation Station, t
 	// すでに取られている予約を取得する
 	query = `
 	SELECT sr.reservation_id, sr.car_number, sr.seat_row, sr.seat_column
-	FROM seat_reservations sr, reservations r, seat_master s, station_master std, station_master sta
+	FROM seat_reservations sr, reservations r, seat_master s
 	WHERE
 		r.reservation_id=sr.reservation_id AND
 		s.train_class=r.train_class AND
 		s.car_number=sr.car_number AND
 		s.seat_column=sr.seat_column AND
-		s.seat_row=sr.seat_row AND
-		std.name=r.departure AND
-		sta.name=r.arrival
+		s.seat_row=sr.seat_row
 	`
 
 	if train.IsNobori {
-		query += "AND ((sta.id < ? AND ? <= std.id) OR (sta.id < ? AND ? <= std.id) OR (? < sta.id AND std.id < ?))"
+		query += "AND ((r.arrival < ? AND ? <= r.departure) OR (r.arrival < ? AND ? <= r.departure) OR (? < r.arrival AND r.departure < ?))"
 	} else {
-		query += "AND ((std.id <= ? AND ? < sta.id) OR (std.id <= ? AND ? < sta.id) OR (sta.id < ? AND ? < std.id))"
+		query += "AND ((r.departure <= ? AND ? < r.arrival) OR (r.departure <= ? AND ? < r.arrival) OR (r.arrival < ? AND ? < r.departure))"
 	}
 
 	seatReservationList := []SeatReservation{}
