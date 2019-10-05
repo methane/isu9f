@@ -14,6 +14,18 @@ func checkAvailableDate(date time.Time) bool {
 	return date.Before(t)
 }
 
+func getUsableTrainClassIDList(fromStation, toStation Station) []int {
+	usable := []int{}
+	if fromStation.IsStopExpress && toStation.IsStopExpress {
+		usable = append(usable, 0)
+	}
+	if fromStation.IsStopSemiExpress && toStation.IsStopSemiExpress {
+		usable = append(usable, 1)
+	}
+	usable = append(usable, 2)
+	return usable
+}
+
 func getUsableTrainClassList(fromStation Station, toStation Station) []string {
 	usable := map[string]string{}
 
