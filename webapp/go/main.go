@@ -2082,6 +2082,8 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	dbx.Exec("TRUNCATE reservations")
 	dbx.Exec("TRUNCATE users")
 
+	callOnStartProfile() // TODO: 最後に外す
+
 	resp := InitializeResponse{
 		availableDays,
 		"golang",
