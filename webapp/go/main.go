@@ -11,7 +11,6 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -250,7 +249,7 @@ type AuthResponse struct {
 
 const (
 	sessionName   = "session_isutrain"
-	availableDays = 10
+	availableDays = 200
 )
 
 var (
@@ -843,7 +842,7 @@ WHERE
 		if ss, ok := seats[carnum]; ok {
 			if s.SeatRow < ss.SeatRow {
 				seats[carnum] = s
-			} else if s.SeatRow==ss.SeatRow && s.SeatColumn < ss.SeatColumn {
+			} else if s.SeatRow == ss.SeatRow && s.SeatColumn < ss.SeatColumn {
 				seats[carnum] = s
 			}
 		} else {
@@ -1042,12 +1041,10 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		var query string
 
 		req.Seats = []RequestSeat{} // 座席リクエスト情報は空に
-		offset := rand.Int()
 		for carnum := 1; carnum <= 16; carnum++ {
-			carnum = carnum + offset%16 + 1
 			seatList := []Seat{}
 			for _, s := range seatMaster[trainClassID[req.TrainClass]] {
-				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat==req.IsSmokingSeat {
+				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat == req.IsSmokingSeat {
 					seatList = append(seatList, s)
 				}
 			}
@@ -1171,7 +1168,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// 座席情報のValidate
 		seatList := Seat{}
-MASTERLOOP:
+	MASTERLOOP:
 		for _, master := range seatMaster[trainClassID[req.TrainClass]] {
 			if master.CarNumber != req.CarNumber || master.SeatClass != req.SeatClass {
 				continue
@@ -1188,24 +1185,24 @@ MASTERLOOP:
 			log.Println("seat not found!!")
 			return
 		}
-/*
-		for _, z := range req.Seats {
-			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
-			err = dbx.GetContext(r.Context(),
-				&seatList, query,
-				req.TrainClass,
-				req.CarNumber,
-				z.Column,
-				z.Row,
-				req.SeatClass,
-			)
-			if err != nil {
-				errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
-				log.Println(err.Error())
-				return
+		/*
+			for _, z := range req.Seats {
+				query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
+				err = dbx.GetContext(r.Context(),
+					&seatList, query,
+					req.TrainClass,
+					req.CarNumber,
+					z.Column,
+					z.Row,
+					req.SeatClass,
+				)
+				if err != nil {
+					errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
+					log.Println(err.Error())
+					return
+				}
 			}
-		}
-*/
+		*/
 		break
 	}
 
@@ -1870,6 +1867,68 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(reservationResponse)
 }
 
+var cancelBuf = make(chan int, 100)
+var cancelMtx sync.Mutex
+
+func batchedCancel(id int) {
+	cancelBuf <- id
+
+	cancelMtx.Lock()
+	defer cancelMtx.Unlock()
+	cancelIDs := []int{}
+
+	cont := true
+	for cont {
+		select {
+		case cid := <-cancelBuf:
+			cancelIDs = append(cancelIDs, cid)
+		default:
+			cont = false
+			break
+		}
+	}
+
+	if len(cancelIDs) > 0 {
+		req := `{"payment_id": [`
+		for _, cid := range cancelIDs {
+			req += fmt.Sprintf(`"%s",`, cid)
+		}
+		req = req[:len(req)-1] + `]}`
+		log.Println("bulk cancel", req)
+
+		client := http.DefaultClient
+		payment_api := os.Getenv("PAYMENT_API")
+		if payment_api == "" {
+			payment_api = "http://payment:5000"
+		}
+		hreq, err := http.NewRequest("POST", payment_api+"/payment/_bulk", bytes.NewBuffer([]byte(req)))
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		resp, err := client.Do(hreq)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// リクエスト失敗
+		if resp.StatusCode != http.StatusOK {
+			log.Println(resp.StatusCode)
+			return
+		}
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Println(err, body)
+			return
+		}
+	}
+}
+
+var xxx int
+
 func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
@@ -1906,62 +1965,66 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	case "done":
 		// 支払いをキャンセルする
-		payInfo := CancelPaymentInformationRequest{reservation.PaymentId}
-		j, err := json.Marshal(payInfo)
-		if err != nil {
-			tx.Rollback()
-			errorResponse(w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
-			log.Println(err.Error())
-			return
-		}
+		if true {
+			payInfo := CancelPaymentInformationRequest{reservation.PaymentId}
+			j, err := json.Marshal(payInfo)
+			if err != nil {
+				tx.Rollback()
+				errorResponse(w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
+				log.Println(err.Error())
+				return
+			}
 
-		payment_api := os.Getenv("PAYMENT_API")
-		if payment_api == "" {
-			payment_api = "http://payment:5000"
-		}
+			payment_api := os.Getenv("PAYMENT_API")
+			if payment_api == "" {
+				payment_api = "http://payment:5000"
+			}
 
-		client := http.DefaultClient
-		req, err := http.NewRequestWithContext(r.Context(), "DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
-		if err != nil {
-			tx.Rollback()
-			errorResponse(w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
-			log.Println(err.Error())
-			return
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			tx.Rollback()
-			errorResponse(w, resp.StatusCode, "HTTP DELETEに失敗しました")
-			log.Println(err.Error())
-			return
-		}
-		defer resp.Body.Close()
+			client := http.DefaultClient
+			req, err := http.NewRequestWithContext(r.Context(), "DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
+			if err != nil {
+				tx.Rollback()
+				errorResponse(w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
+				log.Println(err.Error())
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				tx.Rollback()
+				errorResponse(w, resp.StatusCode, "HTTP DELETEに失敗しました")
+				log.Println(err.Error())
+				return
+			}
+			defer resp.Body.Close()
 
-		// リクエスト失敗
-		if resp.StatusCode != http.StatusOK {
-			tx.Rollback()
-			errorResponse(w, http.StatusInternalServerError, "決済のキャンセルに失敗しました")
-			log.Println(resp.StatusCode)
-			return
-		}
+			// リクエスト失敗
+			if resp.StatusCode != http.StatusOK {
+				tx.Rollback()
+				errorResponse(w, http.StatusInternalServerError, "決済のキャンセルに失敗しました")
+				log.Println(resp.StatusCode)
+				return
+			}
 
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			tx.Rollback()
-			errorResponse(w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
-			log.Println(err.Error())
-			return
-		}
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				tx.Rollback()
+				errorResponse(w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
+				log.Println(err.Error())
+				return
+			}
 
-		// リクエスト取り出し
-		output := CancelPaymentInformationResponse{}
-		err = json.Unmarshal(body, &output)
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
-			log.Println(err.Error())
-			return
+			// リクエスト取り出し
+			output := CancelPaymentInformationResponse{}
+			err = json.Unmarshal(body, &output)
+			if err != nil {
+				errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
+				log.Println(err.Error())
+				return
+			}
+			log.Println(output)
+		} else {
+			batchedCancel(reservation.ReservationId)
 		}
-		log.Println(output)
 	default:
 		// pass(requesting状態のものはpayment_id無いので叩かない)
 	}
@@ -2005,6 +2068,7 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	dbx.Exec("TRUNCATE users")
 
 	initReservationCache()
+	xxx = 0
 
 	// TODO: 最後に外す
 	log.Println("initialize profiler")
