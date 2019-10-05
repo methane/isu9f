@@ -2151,6 +2151,9 @@ func main() {
 		log.Fatalf("failed to connect to DB: %s.", err.Error())
 	}
 	defer dbx.Close()
+	dbx.SetMaxOpenConns(64)
+	dbx.SetMaxIdleConns(64)
+	dbx.SetConnMaxLifetime(time.Minute * 3)
 
 	// HTTP
 
@@ -2175,7 +2178,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/api/user/reservations/:item_id"), userReservationResponseHandler)
 	mux.HandleFunc(pat.Post("/api/user/reservations/:item_id/cancel"), userReservationCancelHandler)
 
-	fmt.Println(banner)
+	//fmt.Println(banner)
 	err = http.ListenAndServe(":8000", mux)
 
 	log.Fatal(err)
