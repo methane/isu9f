@@ -368,7 +368,6 @@ func fareCalc(ctx context.Context, date time.Time, depStation int, destStation i
 		return 0, err
 	}
 
-	log.Println("distance", math.Abs(toStation.Distance-fromStation.Distance))
 	distFare, err := getDistanceFare(ctx, math.Abs(toStation.Distance-fromStation.Distance))
 	if err != nil {
 		return 0, err
