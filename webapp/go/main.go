@@ -302,38 +302,30 @@ func secureRandomStr(b int) string {
 	return fmt.Sprintf("%x", k)
 }
 
+var (
+	distanceFareMaster = []DistanceFare{
+		{0, 2500},
+		{50, 3000},
+		{75, 3700},
+		{100, 4500},
+		{150, 5200},
+		{200, 6000},
+		{300, 7200},
+		{400, 8300},
+		{500, 12000},
+		{1000, 20000},
+	}
+)
+
 func distanceFareHandler(w http.ResponseWriter, r *http.Request) {
-
-	distanceFareList := []DistanceFare{}
-
-	query := "SELECT * FROM distance_fare_master"
-	err := dbx.SelectContext(r.Context(), &distanceFareList, query)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	for _, distanceFare := range distanceFareList {
-		fmt.Fprintf(w, "%#v, %#v\n", distanceFare.Distance, distanceFare.Fare)
-	}
-
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
-	json.NewEncoder(w).Encode(distanceFareList)
+	json.NewEncoder(w).Encode(distanceFareMaster)
 }
 
 func getDistanceFare(ctx context.Context, origToDestDistance float64) (int, error) {
-
-	distanceFareList := []DistanceFare{}
-
-	query := "SELECT distance,fare FROM distance_fare_master ORDER BY distance"
-	err := dbx.SelectContext(ctx, &distanceFareList, query)
-	if err != nil {
-		return 0, err
-	}
-
 	lastDistance := 0.0
 	lastFare := 0
-	for _, distanceFare := range distanceFareList {
+	for _, distanceFare := range distanceFareMaster {
 
 		fmt.Println(origToDestDistance, distanceFare.Distance, distanceFare.Fare)
 		if float64(lastDistance) < origToDestDistance && origToDestDistance < float64(distanceFare.Distance) {
@@ -758,15 +750,38 @@ WHERE
 			return
 		}
 
-		fmt.Println(seatReservationList)
+		resvIDs := []int{}
+		{
+			mResvIDs := make(map[int]bool)
+			for _, sr := range seatReservationList {
+				if !mResvIDs[sr.ReservationId] {
+					mResvIDs[sr.ReservationId] = true
+					resvIDs = append(resvIDs, sr.ReservationId)
+				}
+			}
+		}
+
+		resvMap := make(map[int]Reservation)
+		if len(resvIDs) > 0 {
+			query := "SELECT * FROM reservations WHERE reservation_id IN (?)"
+			query, params, err := sqlx.In(query, resvIDs)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			resvs := []Reservation{}
+			err = dbx.SelectContext(r.Context(), &resvs, query, params...)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			for _, r := range resvs {
+				resvMap[r.ReservationId] = r
+			}
+		}
 
 		for _, seatReservation := range seatReservationList {
-			reservation := Reservation{}
-			query = "SELECT * FROM reservations WHERE reservation_id=?"
-			err = dbx.GetContext(r.Context(), &reservation, query, seatReservation.ReservationId)
-			if err != nil {
-				panic(err)
-			}
+			reservation := resvMap[seatReservation.ReservationId]
 
 			var departureStation, arrivalStation Station
 			departureStation = stationMasterByName[reservation.Departure]
@@ -1168,7 +1183,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	// 当該列車・列車名の予約一覧取得
 	reservations := []Reservation{}
 	query := "SELECT * FROM reservations WHERE date=? AND train_class=? AND train_name=? FOR UPDATE"
-	err = tx.Select(
+	err = tx.SelectContext(r.Context(),
 		&reservations, query,
 		date.Format("2006/01/02"),
 		req.TrainClass,
@@ -1241,7 +1256,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			// 区間重複の場合は更に座席の重複をチェックする
 			SeatReservations := []SeatReservation{}
 			query := "SELECT * FROM seat_reservations WHERE reservation_id=? FOR UPDATE"
-			err = tx.Select(
+			err = tx.SelectContext(r.Context(),
 				&SeatReservations, query,
 				reservation.ReservationId,
 			)
@@ -1415,7 +1430,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	// 予約IDで検索
 	reservation := Reservation{}
 	query := "SELECT * FROM reservations WHERE reservation_id=?"
-	err = tx.Get(
+	err = tx.GetContext(r.Context(),
 		&reservation, query,
 		req.ReservationId,
 	)
@@ -1472,7 +1487,11 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 		payment_api = "http://payment:5000"
 	}
 
-	resp, err := http.Post(payment_api+"/payment", "application/json", bytes.NewBuffer(j))
+	preq, err := http.NewRequestWithContext(r.Context(), "POST", payment_api+"/payment", bytes.NewBuffer(j))
+	if err != nil {
+		log.Panic(err)
+	}
+	resp, err := http.DefaultClient.Do(preq)
 	if err != nil {
 		tx.Rollback()
 		errorResponse(w, resp.StatusCode, "HTTP POSTに失敗しました")
@@ -1804,7 +1823,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 
 	reservation := Reservation{}
 	query := "SELECT * FROM reservations WHERE reservation_id=? AND user_id=?"
-	err = tx.Get(&reservation, query, itemID, user.ID)
+	err = tx.GetContext(r.Context(), &reservation, query, itemID, user.ID)
 	fmt.Println("CANCEL", reservation, itemID, user.ID)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
@@ -1837,8 +1856,8 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			payment_api = "http://payment:5000"
 		}
 
-		client := &http.Client{Timeout: time.Duration(10) * time.Second}
-		req, err := http.NewRequest("DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
+		client := http.DefaultClient
+		req, err := http.NewRequestWithContext(r.Context(), "DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
 		if err != nil {
 			tx.Rollback()
 			errorResponse(w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
