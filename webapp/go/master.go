@@ -1,5 +1,9 @@
 package main
 
+import (
+	"sort"
+)
+
 var stationMaster = []Station{
 	{1, "東京", 0, true, true, true},
 	{2, "古岡", 12.745608, false, true, true},
@@ -87,12 +91,26 @@ var stationMaster = []Station{
 
 var (
 	stationMasterByName = make(map[string]Station)
-	stationMasterById = make(map[int]Station)
+	stationMasterByID = make(map[int]Station)
+
+	stationsNobori = make([]Station, len(stationMaster))
 )
 
 func init(){
 	for _, s := range stationMaster {
 		stationMasterByName[s.Name] = s
-		stationMasterById[s.ID] = s
+		stationMasterByID[s.ID] = s
 	}
+
+	copy(stationsNobori, stationMaster)
+	sort.Slice(stationsNobori, func(a, b int)bool{
+		return stationsNobori[a].Distance > stationsNobori[b].Distance
+	})
+}
+
+func stationsOrderByDistance(isNobori bool) []Station {
+	if isNobori {
+		return stationsNobori
+	}
+	return stationMaster
 }
