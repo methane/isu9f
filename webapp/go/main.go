@@ -96,7 +96,6 @@ type Reservation struct {
 
 func (r *Reservation) fillStationByID() {
 	if r.Departure == "" && r.DepartureID > 0 {
-		log.Println(r)
 		r.Departure = stationMasterByID[r.DepartureID].Name
 		r.Arrival = stationMasterByID[r.ArrivalID].Name
 	}
@@ -1315,7 +1314,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sumFare := (req.Adult * fare) + (req.Child*fare)/2
-	log.Println("SUMFARE")
 
 	// userID取得。ログインしてないと怒られる。
 	user, errCode, errMsg := getUser(r)
@@ -1898,7 +1896,6 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 				log.Println(err.Error())
 				return
 			}
-			log.Println(output)
 			success = true
 		}()
 	default:
