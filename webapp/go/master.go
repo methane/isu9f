@@ -97,7 +97,7 @@ var (
 	stationsNobori = make([]Station, len(stationMaster))
 
 	// [Date][Class(0:最速,1:中間,2:遅いやつ)][]
-	trainMaster  = make(map[time.Time][][]Train)
+	trainMaster  = make(map[string][][]Train)
 	trainClassID = map[string]int{"最速": 0, "中間": 1, "遅いやつ": 2}
 )
 
@@ -118,16 +118,16 @@ func initTrainMaster() {
 	dbx.Select(&trains, "select * from train_master")
 
 	for _, t := range trains {
-		if _, ok := trainMaster[t.Date]; !ok {
-			trainMaster[t.Date] = make([][]Train, 3)
-			trainMaster[t.Date][0] = make([]Train, 0)
-			trainMaster[t.Date][1] = make([]Train, 0)
-			trainMaster[t.Date][2] = make([]Train, 0)
+		date := t.Date.Format("2006/01/02")
+		if _, ok := trainMaster[date]; !ok {
+			trainMaster[date] = make([][]Train, 3)
+			trainMaster[date][0] = make([]Train, 0)
+			trainMaster[date][1] = make([]Train, 0)
+			trainMaster[date][2] = make([]Train, 0)
 		}
-
 		c := trainClassID[t.TrainClass]
 		t.TrainClassID = c
-		trainMaster[t.Date][c] = append(trainMaster[t.Date][c], t)
+		trainMaster[date][c] = append(trainMaster[date][c], t)
 	}
 }
 
@@ -139,9 +139,10 @@ func stationsOrderByDistance(isNobori bool) []Station {
 }
 
 func SelectTrainMaster(date time.Time, classIDs []int, isNobori bool) []Train {
+	d := date.Format("2006/01/02")
 	ret := make([]Train, 0)
 	for _, c := range classIDs {
-		for _, t := range trainMaster[date][c] {
+		for _, t := range trainMaster[d][c] {
 			if t.IsNobori == isNobori {
 				ret = append(ret, t)
 			}
@@ -151,7 +152,8 @@ func SelectTrainMaster(date time.Time, classIDs []int, isNobori bool) []Train {
 }
 
 func SelectTrainMasterByName(date time.Time, classID int, name string) (Train, bool) {
-	for _, t := range trainMaster[date][classID] {
+	d := date.Format("2006/01/02")
+	for _, t := range trainMaster[d][classID] {
 		if t.TrainName == name {
 			return t, true
 		}
