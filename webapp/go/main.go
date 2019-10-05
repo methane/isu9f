@@ -2004,8 +2004,8 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	initReservationCache()
 
 	// TODO: 最後に外す
-	log.Println("initialize profiler")
-	StartProfile(time.Minute)
+	//log.Println("initialize profiler")
+	//StartProfile(time.Minute)
 
 	log.Println("done")
 	resp := InitializeResponse{
@@ -2073,7 +2073,7 @@ func main() {
 		dbname,
 	)
 
-	dbx, err = sqlx.Open(tracedDriver("mysql"), dsn)
+	dbx, err = sqlx.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("failed to connect to DB: %s.", err.Error())
 	}
@@ -2119,7 +2119,7 @@ func main() {
 	mux.HandleFunc(pat.Post("/api/user/reservations/:item_id/cancel"), userReservationCancelHandler)
 
 	//log.Println(banner)
-	err = http.ListenAndServe(":8000", withTrace(mux))
+	err = http.ListenAndServe(":8000", mux)
 
 	log.Fatal(err)
 }

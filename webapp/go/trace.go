@@ -11,11 +11,6 @@ import (
 	"go.opencensus.io/trace"
 )
 
-func init() {
-	initTrace()
-	initTransport()
-}
-
 func initTransport() {
 	http.DefaultClient.Transport = &ochttp.Transport{}
 }
