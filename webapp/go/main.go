@@ -11,10 +11,12 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -325,7 +327,39 @@ var (
 		{500, 12000},
 		{1000, 20000},
 	}
+
+	mReservationCache sync.Mutex
+	reservationCache  map[int]Reservation
 )
+
+func initReservationCache() {
+	mReservationCache.Lock()
+	defer mReservationCache.Unlock()
+
+	reservationCache = make(map[int]Reservation)
+}
+
+func getReservation(id int) (Reservation, bool) {
+	mReservationCache.Lock()
+	defer mReservationCache.Unlock()
+
+	r, ok := reservationCache[id]
+	return r, ok
+}
+
+func insertReservation(r Reservation) {
+	mReservationCache.Lock()
+	defer mReservationCache.Unlock()
+
+	reservationCache[r.ReservationId] = r
+}
+
+func deleteReservation(id int) {
+	mReservationCache.Lock()
+	defer mReservationCache.Unlock()
+
+	delete(reservationCache, id)
+}
 
 func distanceFareHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
@@ -1035,7 +1069,9 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		var query string
 
 		req.Seats = []RequestSeat{} // 座席リクエスト情報は空に
+		offset := rand.Int()
 		for carnum := 1; carnum <= 16; carnum++ {
+			carnum = carnum + offset%16 + 1
 			seatList := []Seat{}
 			for _, s := range seatMaster[trainClassID[req.TrainClass]] {
 				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat==req.IsSmokingSeat {
@@ -1063,11 +1099,9 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				for _, seatReservation := range seatReservationList {
-					reservation := Reservation{}
-					query = "SELECT * FROM reservations WHERE reservation_id=?"
-					err = dbx.GetContext(r.Context(), &reservation, query, seatReservation.ReservationId)
-					if err != nil {
-						panic(err)
+					reservation, ok := getReservation(seatReservation.ReservationId)
+					if !ok {
+						log.Panicf("resv not found: %v", seatReservation.ReservationId)
 					}
 
 					var departureStation, arrivalStation Station
@@ -1391,6 +1425,24 @@ MASTERLOOP:
 	}
 	log.Printf("insert reservations: user_id=%v, resv_id=%v", user.ID, id)
 
+	var uid int = int(user.ID)
+	inserted := Reservation{
+		ReservationId: int(id),
+		UserId:        &uid,
+		Date:          &date,
+		TrainClass:    req.TrainClass,
+		TrainName:     req.TrainName,
+		DepartureID:   stationMasterByName[req.Departure].ID,
+		Departure:     req.Departure,
+		ArrivalID:     stationMasterByName[req.Arrival].ID,
+		Arrival:       req.Arrival,
+		Status:        "requesting",
+		PaymentId:     "a",
+		Adult:         req.Adult,
+		Child:         req.Child,
+		Amount:        sumFare,
+	}
+
 	//席の予約情報登録
 	//reservationsレコード1に対してseat_reservationstが1以上登録される
 	query = "INSERT INTO `seat_reservations` (`reservation_id`, `car_number`, `seat_row`, `seat_column`) VALUES (?, ?, ?, ?)"
@@ -1423,6 +1475,7 @@ MASTERLOOP:
 		return
 	}
 	tx.Commit()
+	insertReservation(inserted)
 	w.Write(response)
 }
 
@@ -1955,6 +2008,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tx.Commit()
+	deleteReservation(int(itemID))
 	messageResponse(w, "cancell complete")
 }
 
@@ -1968,6 +2022,8 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	dbx.Exec("TRUNCATE seat_reservations")
 	dbx.Exec("TRUNCATE reservations")
 	dbx.Exec("TRUNCATE users")
+
+	initReservationCache()
 
 	// TODO: 最後に外す
 	log.Println("initialize profiler")
@@ -2059,6 +2115,7 @@ func main() {
 
 	initTrainMaster()
 	initSeatMaster()
+	initReservationCache()
 
 	// HTTP
 
