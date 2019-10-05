@@ -2111,6 +2111,7 @@ func dummyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	log.SetFlags(log.Lmicroseconds | log.Lshortfile)
 	// MySQL関連のお膳立て
 	var err error
 
