@@ -301,38 +301,30 @@ func secureRandomStr(b int) string {
 	return fmt.Sprintf("%x", k)
 }
 
+var (
+	distanceFareMaster = []DistanceFare{
+		{0, 2500},
+		{50, 3000},
+		{75, 3700},
+		{100, 4500},
+		{150, 5200},
+		{200, 6000},
+		{300, 7200},
+		{400, 8300},
+		{500, 12000},
+		{1000, 20000},
+	}
+)
+
 func distanceFareHandler(w http.ResponseWriter, r *http.Request) {
-
-	distanceFareList := []DistanceFare{}
-
-	query := "SELECT * FROM distance_fare_master"
-	err := dbx.SelectContext(r.Context(), &distanceFareList, query)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	for _, distanceFare := range distanceFareList {
-		fmt.Fprintf(w, "%#v, %#v\n", distanceFare.Distance, distanceFare.Fare)
-	}
-
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
-	json.NewEncoder(w).Encode(distanceFareList)
+	json.NewEncoder(w).Encode(distanceFareMaster)
 }
 
 func getDistanceFare(ctx context.Context, origToDestDistance float64) (int, error) {
-
-	distanceFareList := []DistanceFare{}
-
-	query := "SELECT distance,fare FROM distance_fare_master ORDER BY distance"
-	err := dbx.SelectContext(ctx, &distanceFareList, query)
-	if err != nil {
-		return 0, err
-	}
-
 	lastDistance := 0.0
 	lastFare := 0
-	for _, distanceFare := range distanceFareList {
+	for _, distanceFare := range distanceFareMaster {
 
 		fmt.Println(origToDestDistance, distanceFare.Distance, distanceFare.Fare)
 		if float64(lastDistance) < origToDestDistance && origToDestDistance < float64(distanceFare.Distance) {
