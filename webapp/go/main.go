@@ -898,12 +898,10 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx := dbx.MustBegin()
 	// 止まらない駅の予約を取ろうとしていないかチェックする
 	// 列車データを取得
 	tmas, ok := SelectTrainMasterByName(date, trainClassID[req.TrainClass], req.TrainName)
 	if !ok {
-		tx.Rollback()
 		log.Printf("train (%v-%v-%v) not found", date, req.TrainClass, req.TrainName)
 		errorResponse(w, http.StatusNotFound, "列車データがみつかりません")
 		log.Println(err.Error())
@@ -914,14 +912,12 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	var departureStation, arrivalStation Station
 	// Departure
 	if departureStation, ok = stationMasterByName[tmas.StartStation]; !ok {
-		tx.Rollback()
 		errorResponse(w, http.StatusNotFound, "リクエストされた列車の始発駅データがみつかりません")
 		log.Println("start staton (%s) not found", tmas.StartStation)
 		return
 	}
 	// Arrive
 	if arrivalStation, ok = stationMasterByName[tmas.LastStation]; !ok {
-		tx.Rollback()
 		errorResponse(w, http.StatusNotFound, "リクエストされた列車の終着駅データがみつかりません")
 		log.Println("last station (%s) not found", tmas.LastStation)
 		return
@@ -931,7 +927,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	var fromStation, toStation Station
 	// From
 	if fromStation, ok = stationMasterByName[req.Departure]; !ok {
-		tx.Rollback()
 		errorResponse(w, http.StatusNotFound, fmt.Sprintf("乗車駅データがみつかりません %s", req.Departure))
 		log.Println("departure station (%s) not found", req.Departure)
 		return
@@ -939,7 +934,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 	// To
 	if toStation, ok = stationMasterByName[req.Arrival]; !ok {
-		tx.Rollback()
 		errorResponse(w, http.StatusNotFound, fmt.Sprintf("降車駅データがみつかりません %s", req.Arrival))
 		log.Println("arrival station (%s) not found", req.Arrival)
 		return
@@ -948,24 +942,20 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	switch req.TrainClass {
 	case "最速":
 		if !fromStation.IsStopExpress || !toStation.IsStopExpress {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "最速の止まらない駅です")
 			return
 		}
 	case "中間":
 		if !fromStation.IsStopSemiExpress || !toStation.IsStopSemiExpress {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "中間の止まらない駅です")
 			return
 		}
 	case "遅いやつ":
 		if !fromStation.IsStopLocal || !toStation.IsStopLocal {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "遅いやつの止まらない駅です")
 			return
 		}
 	default:
-		tx.Rollback()
 		errorResponse(w, http.StatusBadRequest, "リクエストされた列車クラスが不明です")
 		log.Println(err.Error())
 		return
@@ -974,23 +964,19 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	// 運行していない区間を予約していないかチェックする
 	if tmas.IsNobori {
 		if fromStation.ID > departureStation.ID || toStation.ID > departureStation.ID {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 		if arrivalStation.ID >= fromStation.ID || arrivalStation.ID > toStation.ID {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 	} else {
 		if fromStation.ID < departureStation.ID || toStation.ID < departureStation.ID {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 		if arrivalStation.ID <= fromStation.ID || arrivalStation.ID < toStation.ID {
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
@@ -1008,8 +994,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		//当該列車・号車中の空き座席検索
 		train, ok := SelectTrainMasterByName(date, trainClassID[req.TrainClass], req.TrainName)
 		if !ok {
-
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -1024,7 +1008,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		if !usable {
 			err = fmt.Errorf("invalid train_class")
 			log.Print(err)
-			tx.Rollback()
 			errorResponse(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -1035,7 +1018,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_class=? AND is_smoking_seat=? ORDER BY seat_row, seat_column"
 			err = dbx.SelectContext(r.Context(), &seatList, query, req.TrainClass, carnum, req.SeatClass, req.IsSmokingSeat)
 			if err != nil {
-				tx.Rollback()
 				errorResponse(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -1055,7 +1037,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 					seat.SeatColumn,
 				)
 				if err != nil {
-					tx.Rollback()
 					errorResponse(w, http.StatusBadRequest, err.Error())
 					return
 				}
@@ -1157,7 +1138,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(req.Seats) == 0 {
 			errorResponse(w, http.StatusNotFound, "あいまい座席予約ができませんでした。指定した席、もしくは1車両内に希望の席数をご用意できませんでした。")
-			tx.Rollback()
 			return
 		}
 	default:
@@ -1175,7 +1155,6 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 				req.SeatClass,
 			)
 			if err != nil {
-				tx.Rollback()
 				errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
 				log.Println(err.Error())
 				return
@@ -1185,6 +1164,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 当該列車・列車名の予約一覧取得
+	tx := dbx.MustBegin()
 	reservations := []Reservation{}
 	query := "SELECT * FROM reservations WHERE date=? AND train_class=? AND train_name=? FOR UPDATE"
 	err = tx.SelectContext(r.Context(),
