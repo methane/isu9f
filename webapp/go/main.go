@@ -11,7 +11,6 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -250,7 +249,7 @@ type AuthResponse struct {
 
 const (
 	sessionName   = "session_isutrain"
-	availableDays = 10
+	availableDays = 50
 )
 
 var (
@@ -843,7 +842,7 @@ WHERE
 		if ss, ok := seats[carnum]; ok {
 			if s.SeatRow < ss.SeatRow {
 				seats[carnum] = s
-			} else if s.SeatRow==ss.SeatRow && s.SeatColumn < ss.SeatColumn {
+			} else if s.SeatRow == ss.SeatRow && s.SeatColumn < ss.SeatColumn {
 				seats[carnum] = s
 			}
 		} else {
@@ -1042,12 +1041,10 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		var query string
 
 		req.Seats = []RequestSeat{} // 座席リクエスト情報は空に
-		offset := rand.Int()
 		for carnum := 1; carnum <= 16; carnum++ {
-			carnum = carnum + offset%16 + 1
 			seatList := []Seat{}
 			for _, s := range seatMaster[trainClassID[req.TrainClass]] {
-				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat==req.IsSmokingSeat {
+				if s.CarNumber == carnum && s.SeatClass == req.SeatClass && s.IsSmokingSeat == req.IsSmokingSeat {
 					seatList = append(seatList, s)
 				}
 			}
@@ -1171,7 +1168,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// 座席情報のValidate
 		seatList := Seat{}
-MASTERLOOP:
+	MASTERLOOP:
 		for _, master := range seatMaster[trainClassID[req.TrainClass]] {
 			if master.CarNumber != req.CarNumber || master.SeatClass != req.SeatClass {
 				continue
@@ -1188,24 +1185,24 @@ MASTERLOOP:
 			log.Println("seat not found!!")
 			return
 		}
-/*
-		for _, z := range req.Seats {
-			query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
-			err = dbx.GetContext(r.Context(),
-				&seatList, query,
-				req.TrainClass,
-				req.CarNumber,
-				z.Column,
-				z.Row,
-				req.SeatClass,
-			)
-			if err != nil {
-				errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
-				log.Println(err.Error())
-				return
+		/*
+			for _, z := range req.Seats {
+				query := "SELECT * FROM seat_master WHERE train_class=? AND car_number=? AND seat_column=? AND seat_row=? AND seat_class=?"
+				err = dbx.GetContext(r.Context(),
+					&seatList, query,
+					req.TrainClass,
+					req.CarNumber,
+					z.Column,
+					z.Row,
+					req.SeatClass,
+				)
+				if err != nil {
+					errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
+					log.Println(err.Error())
+					return
+				}
 			}
-		}
-*/
+		*/
 		break
 	}
 
