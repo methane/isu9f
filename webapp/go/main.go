@@ -1540,8 +1540,10 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.DefaultClient.Do(preq)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, resp.StatusCode, "HTTP POSTに失敗しました")
-		log.Println(err.Error())
+		if resp != nil {
+			errorResponse(w, resp.StatusCode, "HTTP POSTに失敗しました")
+		}
+		log.Println(err)
 		return
 	}
 
@@ -2084,11 +2086,11 @@ func main() {
 
 	for {
 		_, err := dbx.Exec("select 42")
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
+		if err == nil {
+			break
 		}
-		break
+		log.Println(err)
+		time.Sleep(time.Second)
 	}
 
 	initTrainMaster()
