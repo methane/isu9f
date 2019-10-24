@@ -127,8 +127,8 @@ func initTrainMaster() {
 			trainMaster[date][1] = make([]Train, 0)
 			trainMaster[date][2] = make([]Train, 0)
 		}
-		c := trainClassID[t.TrainClass]
-		t.TrainClassID = c
+		c := t.TrainClass
+		t.TrainClassID = int(c)
 		trainMaster[date][c] = append(trainMaster[date][c], t)
 	}
 }
@@ -138,8 +138,8 @@ func initSeatMaster() {
 	dbx.Select(&seats, "SELECT * FROM seat_master")
 
 	for _, s := range seats {
-		tc := trainClassID[s.TrainClass]
-		seatMaster[tc] = append(seatMaster[tc], s)
+		tc := s.TrainClass
+		seatMaster[int(tc)] = append(seatMaster[int(tc)], s)
 	}
 }
 
@@ -163,7 +163,7 @@ func SelectTrainMaster(date time.Time, classIDs []int, isNobori bool) []Train {
 	return ret
 }
 
-func SelectTrainMasterByName(date time.Time, classID int, name string) (Train, bool) {
+func SelectTrainMasterByName(date time.Time, classID TrainClass, name string) (Train, bool) {
 	d := date.Format("2006/01/02")
 	for _, t := range trainMaster[d][classID] {
 		if t.TrainName == name {

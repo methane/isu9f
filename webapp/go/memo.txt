@@ -1,0 +1,174 @@
+# TrainClass の整数化
+
+mysql> alter table seat_master add column train_class_id int not null default 0 after train_class;
+Query OK, 0 rows affected (0.28 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> update seat_master set train_class_id=1 where train_class="中間";
+Query OK, 1314 rows affected (0.01 sec)
+Rows matched: 1314  Changed: 1314  Warnings: 0
+
+mysql> update seat_master set train_class_id=2 where train_class="遅いやつ";
+Query OK, 1314 rows affected (0.01 sec)
+Rows matched: 1314  Changed: 1314  Warnings: 0
+
+mysql> select distinct train_class, train_class_id from seat_master;
++--------------+----------------+
+| train_class  | train_class_id |
++--------------+----------------+
+| 最速         |              0 |
+| 中間         |              1 |
+| 遅いやつ     |              2 |
++--------------+----------------+
+3 rows in set (0.00 sec)
+
+mysql> alter table seat_master change column train_class_id train_class int not null;
+Query OK, 0 rows affected (0.00 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> show create table seat_master\G
+*************************** 1. row ***************************
+       Table: seat_master
+Create Table: CREATE TABLE `seat_master` (
+  `train_class` int(11) NOT NULL,
+  `car_number` int(11) NOT NULL,
+  `seat_column` enum('A','B','C','D','E') NOT NULL,
+  `seat_row` int(11) NOT NULL,
+  `seat_class` enum('premium','reserved','non-reserved') NOT NULL,
+  `is_smoking_seat` tinyint(1) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+1 row in set (0.00 sec)
+
+
+
+CREATE TABLE `reservations` (
+  `reservation_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `user_id` bigint(20) NOT NULL,
+  `date` datetime NOT NULL,
+  `train_class` int not null,
+  `train_name` varchar(100) NOT NULL,
+  `departure` int(11) NOT NULL,
+  `arrival` int(11) NOT NULL,
+  `status` enum('requesting','done','rejected') NOT NULL,
+  `payment_id` varchar(100) NOT NULL,
+  `adult` int(11) NOT NULL,
+  `child` int(11) NOT NULL,
+  `amount` bigint(20) NOT NULL,
+  PRIMARY KEY (`reservation_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=752 DEFAULT CHARSET=utf8mb4
+
+# train_master の train_class を int に
+
+mysql> desc train_master;
++---------------+--------------+------+-----+---------+-------+
+| Field         | Type         | Null | Key | Default | Extra |
++---------------+--------------+------+-----+---------+-------+
+| date          | date         | NO   |     | NULL    |       |
+| departure_at  | time         | NO   |     | NULL    |       |
+| train_class   | varchar(100) | NO   |     | NULL    |       |
+| train_name    | varchar(100) | NO   |     | NULL    |       |
+| start_station | varchar(100) | NO   |     | NULL    |       |
+| last_station  | varchar(100) | NO   |     | NULL    |       |
+| is_nobori     | tinyint(1)   | NO   |     | NULL    |       |
++---------------+--------------+------+-----+---------+-------+
+7 rows in set (0.00 sec)
+
+mysql>
+mysql> alter table train_master add column train_class2 int not null default 0 after train_class;
+Query OK, 0 rows affected (0.46 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> update train_master set train_class2=1 where train_class="中間";
+Query OK, 8757 rows affected (0.08 sec)
+Rows matched: 8757  Changed: 8757  Warnings: 0
+
+mysql> update train_master set train_class2=2 where train_class="遅いやつ";
+Query OK, 26562 rows affected (0.13 sec)
+Rows matched: 26562  Changed: 26562  Warnings: 0
+
+mysql> select distinct train_class, train_class2 from train_master;
++--------------+--------------+
+| train_class  | train_class2 |
++--------------+--------------+
+| 最速         |            0 |
+| 遅いやつ     |            2 |
+| 中間         |            1 |
++--------------+--------------+
+3 rows in set (0.08 sec)
+
+mysql> alter table train_master drop column train_class;
+Query OK, 0 rows affected (0.44 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> alter table train_master change column train_class2 train_class int not null;
+Query OK, 0 rows affected (0.00 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> show create table train_master\G
+*************************** 1. row ***************************
+       Table: train_master
+Create Table: CREATE TABLE `train_master` (
+  `date` date NOT NULL,
+  `departure_at` time NOT NULL,
+  `train_class` int(11) NOT NULL,
+  `train_name` varchar(100) NOT NULL,
+  `start_station` varchar(100) NOT NULL,
+  `last_station` varchar(100) NOT NULL,
+  `is_nobori` tinyint(1) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+1 row in set (0.00 sec)
+
+
+# train_timetable_master
+
+mysql> show create table train_timetable_master;
++------------------------+-----------------
+| Table                  | Create Table                                                                                                                                                                                                                                                                                                                                                                              |
++------------------------+----------------
+| train_timetable_master | CREATE TABLE `train_timetable_master` (
+  `date` date NOT NULL,
+  `train_class` varchar(100) NOT NULL,
+  `train_name` varchar(100) NOT NULL,
+  `station` varchar(100) NOT NULL,
+  `departure` time NOT NULL,
+  `arrival` time NOT NULL,
+  KEY `train_timetable_master01` (`date`,`train_class`,`train_name`,`station`),
+  KEY `date_idx` (`date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 |
++------------------------+---------------
+1 row in set (0.01 sec)
+
+mysql> alter table train_timetable_master add column train_class2 int not null default 0 after train_class;
+Query OK, 0 rows affected (23.07 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> alter table train_timetable_master drop key train_timetable_master01;
+Query OK, 0 rows affected (0.01 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> update train_timetable_master set train_class2=1 where train_class="中間";
+Query OK, 315252 rows affected (3.79 sec)
+Rows matched: 315252  Changed: 315252  Warnings: 0
+
+mysql> update train_timetable_master set train_class2=2 where train_class="遅いやつ";
+Query OK, 2178084 rows affected (9.40 sec)
+Rows matched: 2178084  Changed: 2178084  Warnings: 0
+
+mysql> select distinct train_class, train_class2 from train_timetable_master;
++--------------+--------------+
+| train_class  | train_class2 |
++--------------+--------------+
+| 最速         |            0 |
+| 遅いやつ     |            2 |
+| 中間         |            1 |
++--------------+--------------+
+3 rows in set (3.50 sec)
+
+mysql> alter table train_timetable_master drop column train_class;
+Query OK, 0 rows affected (10.57 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> alter table train_timetable_master change column train_class2 train_class int not null;
+Query OK, 0 rows affected (0.00 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```

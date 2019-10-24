@@ -26,38 +26,17 @@ func getUsableTrainClassIDList(fromStation, toStation Station) []int {
 	return usable
 }
 
-func getUsableTrainClassList(fromStation Station, toStation Station) []string {
-	usable := map[string]string{}
-
-	for key, value := range TrainClassMap {
-		usable[key] = value
+func getUsableTrainClassList(fromStation Station, toStation Station) []TrainClass {
+	ret := []TrainClass{}
+	if fromStation.IsStopExpress && toStation.IsStopExpress {
+		ret = append(ret, TrainClass(0))
 	}
-
-	if !fromStation.IsStopExpress {
-		delete(usable, "express")
+	if fromStation.IsStopSemiExpress && toStation.IsStopSemiExpress {
+		ret = append(ret, TrainClass(1))
 	}
-	if !fromStation.IsStopSemiExpress {
-		delete(usable, "semi_express")
+	if fromStation.IsStopLocal && toStation.IsStopLocal {
+		ret = append(ret, TrainClass(2))
 	}
-	if !fromStation.IsStopLocal {
-		delete(usable, "local")
-	}
-
-	if !toStation.IsStopExpress {
-		delete(usable, "express")
-	}
-	if !toStation.IsStopSemiExpress {
-		delete(usable, "semi_express")
-	}
-	if !toStation.IsStopLocal {
-		delete(usable, "local")
-	}
-
-	ret := []string{}
-	for _, v := range usable {
-		ret = append(ret, v)
-	}
-
 	return ret
 }
 
