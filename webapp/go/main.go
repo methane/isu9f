@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"sync"
@@ -249,7 +250,7 @@ type AuthResponse struct {
 
 const (
 	sessionName   = "session_isutrain"
-	availableDays = 50
+	availableDays = 200
 )
 
 var (
@@ -269,13 +270,16 @@ func messageResponse(w http.ResponseWriter, message string) {
 	w.Write(errResp)
 }
 
-func errorResponse(w http.ResponseWriter, errCode int, message string) {
+func errorResponse(r *http.Request, w http.ResponseWriter, errCode int, message string) {
 	e := map[string]interface{}{
 		"is_error": true,
 		"message":  message,
 	}
 	errResp, _ := json.Marshal(e)
 
+	if false {
+		log.Printf("%v %v %v\n%s", r.URL.Path, errCode, message, debug.Stack())
+	}
 	w.WriteHeader(errCode)
 	w.Write(errResp)
 }
@@ -458,13 +462,13 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date, err := time.Parse(time.RFC3339, r.URL.Query().Get("use_at"))
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	date = date.In(jst)
 
 	if !checkAvailableDate(date) {
-		errorResponse(w, http.StatusNotFound, "予約可能期間外です")
+		errorResponse(r, w, http.StatusNotFound, "予約可能期間外です")
 		return
 	}
 
@@ -480,13 +484,13 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 	// From
 	if fromStation, ok = stationMasterByName[fromName]; !ok {
 		log.Printf("fromStation(%s): no rows", fromName)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// To
 	if toStation, ok = stationMasterByName[toName]; !ok {
 		log.Print("toStation(%s): no rows", toName)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -540,7 +544,8 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				} else {
 					// 出発駅より先に終点が見つかったとき
-					log.Println("なんかおかしい")
+					//TODO
+					//log.Println("なんかおかしい")
 					break
 				}
 			}
@@ -559,13 +564,13 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 			err = dbx.GetContext(r.Context(), &departure, "SELECT departure FROM train_timetable_master WHERE date=? AND train_class=? AND train_name=? AND station=?", date.Format("2006/01/02"), train.TrainClass, train.TrainName, fromStation.Name)
 			if err != nil {
-				errorResponse(w, http.StatusInternalServerError, err.Error())
+				errorResponse(r, w, http.StatusInternalServerError, err.Error())
 				return
 			}
 
 			departureDate, err := time.Parse("2006/01/02 15:04:05 -07:00 MST", fmt.Sprintf("%s %s +09:00 JST", date.Format("2006/01/02"), departure))
 			if err != nil {
-				errorResponse(w, http.StatusInternalServerError, err.Error())
+				errorResponse(r, w, http.StatusInternalServerError, err.Error())
 				return
 			}
 
@@ -576,13 +581,13 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 			err = dbx.GetContext(r.Context(), &arrival, "SELECT arrival FROM train_timetable_master WHERE date=? AND train_class=? AND train_name=? AND station=?", date.Format("2006/01/02"), train.TrainClass, train.TrainName, toStation.Name)
 			if err != nil {
-				errorResponse(w, http.StatusInternalServerError, err.Error())
+				errorResponse(r, w, http.StatusInternalServerError, err.Error())
 				return
 			}
 
 			avail_seats, err := train.getAvailableSeats(r.Context(), fromStation, toStation)
 			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
+				errorResponse(r, w, http.StatusBadRequest, err.Error())
 				return
 			}
 			var premium_avail_seats []Seat
@@ -646,21 +651,21 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 			// 料金計算
 			premiumFare, err := fareCalc(r.Context(), date, fromStation.ID, toStation.ID, train.TrainClass, "premium")
 			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
+				errorResponse(r, w, http.StatusBadRequest, err.Error())
 				return
 			}
 			premiumFare = premiumFare*adult + premiumFare/2*child
 
 			reservedFare, err := fareCalc(r.Context(), date, fromStation.ID, toStation.ID, train.TrainClass, "reserved")
 			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
+				errorResponse(r, w, http.StatusBadRequest, err.Error())
 				return
 			}
 			reservedFare = reservedFare*adult + reservedFare/2*child
 
 			nonReservedFare, err := fareCalc(r.Context(), date, fromStation.ID, toStation.ID, train.TrainClass, "non-reserved")
 			if err != nil {
-				errorResponse(w, http.StatusBadRequest, err.Error())
+				errorResponse(r, w, http.StatusBadRequest, err.Error())
 				return
 			}
 			nonReservedFare = nonReservedFare*adult + nonReservedFare/2*child
@@ -685,7 +690,7 @@ func trainSearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := json.Marshal(trainSearchResponseList)
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Write(resp)
@@ -701,13 +706,13 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 	date, err := time.Parse(time.RFC3339, r.URL.Query().Get("date"))
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	date = date.In(jst)
 
 	if !checkAvailableDate(date) {
-		errorResponse(w, http.StatusNotFound, "予約可能期間外です")
+		errorResponse(r, w, http.StatusNotFound, "予約可能期間外です")
 		return
 	}
 
@@ -721,7 +726,7 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 	train, ok := SelectTrainMasterByName(date, trainClassID[trainClass], trainName)
 	if !ok {
 		log.Printf("train (%v-%v-%v) not found", date, trainClass, trainName)
-		errorResponse(w, http.StatusNotFound, "列車が存在しません")
+		errorResponse(r, w, http.StatusNotFound, "列車が存在しません")
 		return
 	}
 
@@ -729,13 +734,13 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 	// From
 	if fromStation, ok = stationMasterByName[fromName]; !ok {
 		log.Printf("fromStation(%s): no rows", fromName)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// To
 	if toStation, ok = stationMasterByName[toName]; !ok {
 		log.Print("toStation(%s): no rows", toName)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -749,7 +754,7 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 	if !usable {
 		err = fmt.Errorf("invalid train_class")
 		log.Print(err)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -791,7 +796,7 @@ WHERE
 			seat.SeatColumn,
 		)
 		if err != nil {
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -863,7 +868,7 @@ WHERE
 	c := CarInformation{date.Format("2006/01/02"), trainClass, trainName, carNumber, seatInformationList, simpleCarInformationList}
 	resp, err := json.Marshal(c)
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Write(resp)
@@ -905,7 +910,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	req := new(TrainReservationRequest)
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "JSON parseに失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -914,13 +919,13 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
 	date, err := time.Parse(time.RFC3339, req.Date)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "時刻のparseに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "時刻のparseに失敗しました")
 		log.Println(err.Error())
 	}
 	date = date.In(jst)
 
 	if !checkAvailableDate(date) {
-		errorResponse(w, http.StatusNotFound, "予約可能期間外です")
+		errorResponse(r, w, http.StatusNotFound, "予約可能期間外です")
 		return
 	}
 
@@ -929,7 +934,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	tmas, ok := SelectTrainMasterByName(date, trainClassID[req.TrainClass], req.TrainName)
 	if !ok {
 		log.Printf("train (%v-%v-%v) not found", date, req.TrainClass, req.TrainName)
-		errorResponse(w, http.StatusNotFound, "列車データがみつかりません")
+		errorResponse(r, w, http.StatusNotFound, "列車データがみつかりません")
 		log.Println(err.Error())
 		return
 	}
@@ -938,13 +943,13 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	var departureStation, arrivalStation Station
 	// Departure
 	if departureStation, ok = stationMasterByName[tmas.StartStation]; !ok {
-		errorResponse(w, http.StatusNotFound, "リクエストされた列車の始発駅データがみつかりません")
+		errorResponse(r, w, http.StatusNotFound, "リクエストされた列車の始発駅データがみつかりません")
 		log.Println("start staton (%s) not found", tmas.StartStation)
 		return
 	}
 	// Arrive
 	if arrivalStation, ok = stationMasterByName[tmas.LastStation]; !ok {
-		errorResponse(w, http.StatusNotFound, "リクエストされた列車の終着駅データがみつかりません")
+		errorResponse(r, w, http.StatusNotFound, "リクエストされた列車の終着駅データがみつかりません")
 		log.Println("last station (%s) not found", tmas.LastStation)
 		return
 	}
@@ -953,14 +958,14 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	var fromStation, toStation Station
 	// From
 	if fromStation, ok = stationMasterByName[req.Departure]; !ok {
-		errorResponse(w, http.StatusNotFound, fmt.Sprintf("乗車駅データがみつかりません %s", req.Departure))
+		errorResponse(r, w, http.StatusNotFound, fmt.Sprintf("乗車駅データがみつかりません %s", req.Departure))
 		log.Println("departure station (%s) not found", req.Departure)
 		return
 	}
 
 	// To
 	if toStation, ok = stationMasterByName[req.Arrival]; !ok {
-		errorResponse(w, http.StatusNotFound, fmt.Sprintf("降車駅データがみつかりません %s", req.Arrival))
+		errorResponse(r, w, http.StatusNotFound, fmt.Sprintf("降車駅データがみつかりません %s", req.Arrival))
 		log.Println("arrival station (%s) not found", req.Arrival)
 		return
 	}
@@ -968,21 +973,21 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	switch req.TrainClass {
 	case "最速":
 		if !fromStation.IsStopExpress || !toStation.IsStopExpress {
-			errorResponse(w, http.StatusBadRequest, "最速の止まらない駅です")
+			errorResponse(r, w, http.StatusBadRequest, "最速の止まらない駅です")
 			return
 		}
 	case "中間":
 		if !fromStation.IsStopSemiExpress || !toStation.IsStopSemiExpress {
-			errorResponse(w, http.StatusBadRequest, "中間の止まらない駅です")
+			errorResponse(r, w, http.StatusBadRequest, "中間の止まらない駅です")
 			return
 		}
 	case "遅いやつ":
 		if !fromStation.IsStopLocal || !toStation.IsStopLocal {
-			errorResponse(w, http.StatusBadRequest, "遅いやつの止まらない駅です")
+			errorResponse(r, w, http.StatusBadRequest, "遅いやつの止まらない駅です")
 			return
 		}
 	default:
-		errorResponse(w, http.StatusBadRequest, "リクエストされた列車クラスが不明です")
+		errorResponse(r, w, http.StatusBadRequest, "リクエストされた列車クラスが不明です")
 		log.Println(err.Error())
 		return
 	}
@@ -990,20 +995,20 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	// 運行していない区間を予約していないかチェックする
 	if tmas.IsNobori {
 		if fromStation.ID > departureStation.ID || toStation.ID > departureStation.ID {
-			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
+			errorResponse(r, w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 		if arrivalStation.ID >= fromStation.ID || arrivalStation.ID > toStation.ID {
-			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
+			errorResponse(r, w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 	} else {
 		if fromStation.ID < departureStation.ID || toStation.ID < departureStation.ID {
-			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
+			errorResponse(r, w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 		if arrivalStation.ID <= fromStation.ID || arrivalStation.ID < toStation.ID {
-			errorResponse(w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
+			errorResponse(r, w, http.StatusBadRequest, "リクエストされた区間に列車が運行していない区間が含まれています")
 			return
 		}
 	}
@@ -1020,7 +1025,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		//当該列車・号車中の空き座席検索
 		train, ok := SelectTrainMasterByName(date, trainClassID[req.TrainClass], req.TrainName)
 		if !ok {
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -1034,7 +1039,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		if !usable {
 			err = fmt.Errorf("invalid train_class")
 			log.Print(err)
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -1064,14 +1069,15 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 					seat.SeatColumn,
 				)
 				if err != nil {
-					errorResponse(w, http.StatusBadRequest, err.Error())
+					errorResponse(r, w, http.StatusBadRequest, err.Error())
 					return
 				}
 
 				for _, seatReservation := range seatReservationList {
 					reservation, ok := getReservation(seatReservation.ReservationId)
 					if !ok {
-						log.Panicf("resv not found: %v", seatReservation.ReservationId)
+						log.Printf("resv not found: %v", seatReservation.ReservationId)
+						continue
 					}
 
 					var departureStation, arrivalStation Station
@@ -1143,9 +1149,9 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			if len(req.Seats) < req.Adult+req.Child {
 				// リクエストに対して席数が足りてない
 				// 次の号車にうつしたい
-				log.Println("-----------------")
-				log.Printf("現在検索中の車両: %d号車, リクエスト座席数: %d, 予約できそうな座席数: %d, 不足数: %d\n", carnum, req.Adult+req.Child, len(req.Seats), req.Adult+req.Child-len(req.Seats))
-				log.Println("リクエストに対して座席数が不足しているため、次の車両を検索します。")
+				//log.Println("-----------------")
+				//log.Printf("現在検索中の車両: %d号車, リクエスト座席数: %d, 予約できそうな座席数: %d, 不足数: %d\n", carnum, req.Adult+req.Child, len(req.Seats), req.Adult+req.Child-len(req.Seats))
+				//log.Println("リクエストに対して座席数が不足しているため、次の車両を検索します。")
 				req.Seats = []RequestSeat{}
 				if carnum == 16 {
 					log.Println("この新幹線にまとめて予約できる席数がなかったから検索をやめるよ")
@@ -1153,7 +1159,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			log.Printf("空き実績: %d号車 シート:%v 席数:%d\n", carnum, req.Seats, len(req.Seats))
+			//log.Printf("空き実績: %d号車 シート:%v 席数:%d\n", carnum, req.Seats, len(req.Seats))
 			if len(req.Seats) >= req.Adult+req.Child {
 				log.Println("予約情報に追加したよ")
 				req.Seats = req.Seats[:req.Adult+req.Child]
@@ -1162,7 +1168,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(req.Seats) == 0 {
-			errorResponse(w, http.StatusNotFound, "あいまい座席予約ができませんでした。指定した席、もしくは1車両内に希望の席数をご用意できませんでした。")
+			errorResponse(r, w, http.StatusNotFound, "あいまい座席予約ができませんでした。指定した席、もしくは1車両内に希望の席数をご用意できませんでした。")
 			return
 		}
 	default:
@@ -1181,7 +1187,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if seatList.CarNumber == 0 {
-			errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
+			errorResponse(r, w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
 			log.Println("seat not found!!")
 			return
 		}
@@ -1197,7 +1203,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 					req.SeatClass,
 				)
 				if err != nil {
-					errorResponse(w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
+					errorResponse(r, w, http.StatusNotFound, "リクエストされた座席情報は存在しません。号車・喫煙席・座席クラスなど組み合わせを見直してください")
 					log.Println(err.Error())
 					return
 				}
@@ -1218,7 +1224,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "列車予約情報の取得に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "列車予約情報の取得に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1233,7 +1239,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			tx.Rollback()
 			log.Printf("train (%v-%v-%v) not found", date, req.TrainClass, req.TrainName)
-			errorResponse(w, http.StatusNotFound, "列車データがみつかりません")
+			errorResponse(r, w, http.StatusNotFound, "列車データがみつかりません")
 			log.Println(err.Error())
 			return
 		}
@@ -1244,7 +1250,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		// From
 		if reservedfromStation, ok = stationMasterByName[reservation.Departure]; !ok {
 			tx.Rollback()
-			errorResponse(w, http.StatusNotFound, "予約情報に記載された列車の乗車駅データがみつかりません")
+			errorResponse(r, w, http.StatusNotFound, "予約情報に記載された列車の乗車駅データがみつかりません")
 			log.Println("departure station (%s) not found", reservation.Departure)
 			return
 		}
@@ -1252,7 +1258,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		// To
 		if reservedtoStation, ok = stationMasterByName[reservation.Arrival]; !ok {
 			tx.Rollback()
-			errorResponse(w, http.StatusNotFound, "予約情報に記載された列車の降車駅データがみつかりません")
+			errorResponse(r, w, http.StatusNotFound, "予約情報に記載された列車の降車駅データがみつかりません")
 			log.Println("arrival station (%s) not found", reservation.Arrival)
 			return
 		}
@@ -1290,7 +1296,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			)
 			if err != nil {
 				tx.Rollback()
-				errorResponse(w, http.StatusInternalServerError, "座席予約情報の取得に失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "座席予約情報の取得に失敗しました")
 				log.Println(err.Error())
 				return
 			}
@@ -1300,7 +1306,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 					if v.CarNumber == req.CarNumber && v.SeatRow == seat.Row && v.SeatColumn == seat.Column {
 						tx.Rollback()
 						log.Println("Duplicated ", reservation)
-						errorResponse(w, http.StatusBadRequest, "リクエストに既に予約された席が含まれています")
+						errorResponse(r, w, http.StatusBadRequest, "リクエストに既に予約された席が含まれています")
 						return
 					}
 				}
@@ -1328,7 +1334,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		fare, err = fareCalc(ctx, date, fromStation.ID, toStation.ID, req.TrainClass, "premium")
 		if err != nil {
 			tx.Rollback()
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			log.Println("fareCalc " + err.Error())
 			return
 		}
@@ -1336,7 +1342,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		fare, err = fareCalc(ctx, date, fromStation.ID, toStation.ID, req.TrainClass, "reserved")
 		if err != nil {
 			tx.Rollback()
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			log.Println("fareCalc " + err.Error())
 			return
 		}
@@ -1344,13 +1350,13 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		fare, err = fareCalc(ctx, date, fromStation.ID, toStation.ID, req.TrainClass, "non-reserved")
 		if err != nil {
 			tx.Rollback()
-			errorResponse(w, http.StatusBadRequest, err.Error())
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			log.Println("fareCalc " + err.Error())
 			return
 		}
 	default:
 		tx.Rollback()
-		errorResponse(w, http.StatusBadRequest, "リクエストされた座席クラスが不明です")
+		errorResponse(r, w, http.StatusBadRequest, "リクエストされた座席クラスが不明です")
 		return
 	}
 	sumFare := (req.Adult * fare) + (req.Child*fare)/2
@@ -1359,7 +1365,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
 		tx.Rollback()
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		log.Printf("%s", errMsg)
 		return
 	}
@@ -1382,14 +1388,14 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusBadRequest, "予約の保存に失敗しました。"+err.Error())
+		errorResponse(r, w, http.StatusBadRequest, "予約の保存に失敗しました。"+err.Error())
 		log.Println(err.Error())
 		return
 	}
 	id, err := result.LastInsertId() //予約ID
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "予約IDの取得に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "予約IDの取得に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1426,7 +1432,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		if err != nil {
 			tx.Rollback()
-			errorResponse(w, http.StatusInternalServerError, "座席予約の登録に失敗しました")
+			errorResponse(r, w, http.StatusInternalServerError, "座席予約の登録に失敗しました")
 			log.Println(err.Error())
 			return
 		}
@@ -1440,7 +1446,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 	response, err := json.Marshal(rr)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "レスポンスの生成に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "レスポンスの生成に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1466,7 +1472,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	req := new(ReservationPaymentRequest)
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "JSON parseに失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1482,13 +1488,13 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
-		errorResponse(w, http.StatusNotFound, "予約情報がみつかりません")
+		errorResponse(r, w, http.StatusNotFound, "予約情報がみつかりません")
 		log.Println(err.Error())
 		return
 	}
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "予約情報の取得に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "予約情報の取得に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1497,13 +1503,13 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
 		tx.Rollback()
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		log.Printf("%s", errMsg)
 		return
 	}
 	if int64(*reservation.UserId) != user.ID {
 		tx.Rollback()
-		errorResponse(w, http.StatusForbidden, "他のユーザIDの支払いはできません")
+		errorResponse(r, w, http.StatusForbidden, "他のユーザIDの支払いはできません")
 		log.Println(err.Error())
 		return
 	}
@@ -1512,7 +1518,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	switch reservation.Status {
 	case "done":
 		tx.Rollback()
-		errorResponse(w, http.StatusForbidden, "既に支払いが完了している予約IDです")
+		errorResponse(r, w, http.StatusForbidden, "既に支払いが完了している予約IDです")
 		return
 	default:
 		break
@@ -1523,7 +1529,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	j, err := json.Marshal(PaymentInformation{PayInfo: payInfo})
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1541,7 +1547,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		tx.Rollback()
 		if resp != nil {
-			errorResponse(w, resp.StatusCode, "HTTP POSTに失敗しました")
+			errorResponse(r, w, resp.StatusCode, "HTTP POSTに失敗しました")
 		}
 		log.Println(err)
 		return
@@ -1550,7 +1556,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1558,7 +1564,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	// リクエスト失敗
 	if resp.StatusCode != http.StatusOK {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "決済に失敗しました。カードトークンや支払いIDが間違っている可能性があります")
+		errorResponse(r, w, http.StatusInternalServerError, "決済に失敗しました。カードトークンや支払いIDが間違っている可能性があります")
 		log.Println(resp.StatusCode)
 		return
 	}
@@ -1567,7 +1573,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	output := PaymentResponse{}
 	err = json.Unmarshal(body, &output)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "JSON parseに失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1582,7 +1588,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "予約情報の更新に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "予約情報の更新に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1593,7 +1599,7 @@ func reservationPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	response, err := json.Marshal(rr)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "レスポンスの生成に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "レスポンスの生成に失敗しました")
 		log.Println(err.Error())
 		return
 	}
@@ -1614,7 +1620,7 @@ func getAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// userID取得
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		log.Printf("%s", errMsg)
 		return
 	}
@@ -1641,7 +1647,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 	salt := make([]byte, 1024)
 	_, err := crand.Read(salt)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "salt generator error")
+		errorResponse(r, w, http.StatusInternalServerError, "salt generator error")
 		return
 	}
 	superSecurePassword := pbkdf2.Key([]byte(user.Password), salt, 100, 256, sha256.New)
@@ -1653,7 +1659,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		superSecurePassword,
 	)
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, "user registration failed")
+		errorResponse(r, w, http.StatusBadRequest, "user registration failed")
 		return
 	}
 
@@ -1676,18 +1682,18 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	query := "SELECT * FROM users WHERE email=?"
 	err := dbx.GetContext(r.Context(), &user, query, postUser.Email)
 	if err == sql.ErrNoRows {
-		errorResponse(w, http.StatusForbidden, "authentication failed")
+		errorResponse(r, w, http.StatusForbidden, "authentication failed")
 		return
 	}
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, err.Error())
+		errorResponse(r, w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	challengePassword := pbkdf2.Key([]byte(postUser.Password), user.Salt, 100, 256, sha256.New)
 
 	if !bytes.Equal(user.HashedPassword, challengePassword) {
-		errorResponse(w, http.StatusForbidden, "authentication failed")
+		errorResponse(r, w, http.StatusForbidden, "authentication failed")
 		return
 	}
 
@@ -1696,7 +1702,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	session.Values["user_id"] = user.ID
 	if err = session.Save(r, w); err != nil {
 		log.Print(err)
-		errorResponse(w, http.StatusInternalServerError, "session error")
+		errorResponse(r, w, http.StatusInternalServerError, "session error")
 		return
 	}
 	messageResponse(w, "autheticated")
@@ -1713,7 +1719,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	session.Values["user_id"] = 0
 	if err := session.Save(r, w); err != nil {
 		log.Print(err)
-		errorResponse(w, http.StatusInternalServerError, "session error")
+		errorResponse(r, w, http.StatusInternalServerError, "session error")
 		return
 	}
 	messageResponse(w, "logged out")
@@ -1797,7 +1803,7 @@ func userReservationsHandler(w http.ResponseWriter, r *http.Request) {
 	*/
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		return
 	}
 	reservationList := []Reservation{}
@@ -1807,19 +1813,17 @@ func userReservationsHandler(w http.ResponseWriter, r *http.Request) {
 	err := dbx.SelectContext(ctx, &reservationList, query, user.ID)
 	if err != nil {
 		log.Printf("reservation not found: user_id=%v", user.ID)
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	reservationResponseList := []ReservationResponse{}
 
-	for _, r := range reservationList {
-		r.fillStationByID()
-		//log.Printf(" resv: %+v", r)
-		res, err := makeReservationResponse(ctx, r)
+	for _, rsv := range reservationList {
+		rsv.fillStationByID()
+		res, err := makeReservationResponse(ctx, rsv)
 		if err != nil {
-			errorResponse(w, http.StatusBadRequest, err.Error())
-			log.Println("makeReservationResponse()", err)
+			errorResponse(r, w, http.StatusBadRequest, err.Error())
 			return
 		}
 		reservationResponseList = append(reservationResponseList, res)
@@ -1833,13 +1837,13 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		return
 	}
 	itemIDStr := pat.Param(r, "item_id")
 	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 	if err != nil || itemID <= 0 {
-		errorResponse(w, http.StatusBadRequest, "incorrect item id")
+		errorResponse(r, w, http.StatusBadRequest, "incorrect item id")
 		return
 	}
 
@@ -1848,11 +1852,11 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	err = dbx.GetContext(ctx, &reservation, query, itemID, user.ID)
 	if err == sql.ErrNoRows {
 		log.Printf("resv not found: user_id=%v id=%v", user.ID, itemID)
-		errorResponse(w, http.StatusNotFound, "Reservation not found")
+		errorResponse(r, w, http.StatusNotFound, "Reservation not found")
 		return
 	}
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		return
 	}
 	reservation.fillStationByID()
@@ -1860,7 +1864,7 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	reservationResponse, err := makeReservationResponse(ctx, reservation)
 
 	if err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		errorResponse(r, w, http.StatusBadRequest, err.Error())
 		log.Println("makeReservationResponse() ", err)
 		return
 	}
@@ -1869,78 +1873,75 @@ func userReservationResponseHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(reservationResponse)
 }
 
-var cancelBuf = make(chan int, 100)
-var cancelMtx sync.Mutex
+var cancelBuf = make(chan string, 100)
 
-func batchedCancel(id int) {
-	cancelBuf <- id
+func batchCancel(cancelIDs []string) {
+	req := `{"payment_id": [`
+	for _, cid := range cancelIDs {
+		req += fmt.Sprintf(`"%s",`, cid)
+	}
+	req = req[:len(req)-1] + `]}`
+	log.Println("bulk cancel", req)
 
-	cancelMtx.Lock()
-	defer cancelMtx.Unlock()
-	cancelIDs := []int{}
+	client := http.DefaultClient
+	payment_api := os.Getenv("PAYMENT_API")
+	if payment_api == "" {
+		payment_api = "http://payment:5000"
+	}
+	hreq, err := http.NewRequest("POST", payment_api+"/payment/_bulk", bytes.NewBuffer([]byte(req)))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	resp, err := client.Do(hreq)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer resp.Body.Close()
 
-	cont := true
-	for cont {
+	// リクエスト失敗
+	if resp.StatusCode != http.StatusOK {
+		log.Println(resp.StatusCode)
+		return
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err, body)
+		return
+	}
+
+	log.Printf("Canceled %s -- %+v", body, cancelIDs)
+}
+
+func batchedCancelWorker() {
+	cancelIDs := []string{}
+
+	for {
 		select {
 		case cid := <-cancelBuf:
 			cancelIDs = append(cancelIDs, cid)
 		default:
-			cont = false
-			break
-		}
-	}
-
-	if len(cancelIDs) > 0 {
-		req := `{"payment_id": [`
-		for _, cid := range cancelIDs {
-			req += fmt.Sprintf(`"%s",`, cid)
-		}
-		req = req[:len(req)-1] + `]}`
-		log.Println("bulk cancel", req)
-
-		client := http.DefaultClient
-		payment_api := os.Getenv("PAYMENT_API")
-		if payment_api == "" {
-			payment_api = "http://payment:5000"
-		}
-		hreq, err := http.NewRequest("POST", payment_api+"/payment/_bulk", bytes.NewBuffer([]byte(req)))
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		resp, err := client.Do(hreq)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		defer resp.Body.Close()
-
-		// リクエスト失敗
-		if resp.StatusCode != http.StatusOK {
-			log.Println(resp.StatusCode)
-			return
-		}
-
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Println(err, body)
-			return
+			if len(cancelIDs) > 0 {
+				go batchCancel(cancelIDs)
+				cancelIDs = make([]string, 0)
+			}
+			time.Sleep(time.Second)
 		}
 	}
 }
 
-var xxx int
-
 func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	user, errCode, errMsg := getUser(r)
 	if errCode != http.StatusOK {
-		errorResponse(w, errCode, errMsg)
+		errorResponse(r, w, errCode, errMsg)
 		return
 	}
 	itemIDStr := pat.Param(r, "item_id")
 	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 	if err != nil || itemID <= 0 {
-		errorResponse(w, http.StatusBadRequest, "incorrect item id")
+		errorResponse(r, w, http.StatusBadRequest, "incorrect item id")
 		return
 	}
 
@@ -1952,27 +1953,27 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("CANCEL", reservation, itemID, user.ID)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
-		errorResponse(w, http.StatusBadRequest, "reservations naiyo")
+		errorResponse(r, w, http.StatusBadRequest, "reservations naiyo")
 		return
 	}
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "予約情報の検索に失敗しました")
+		errorResponse(r, w, http.StatusInternalServerError, "予約情報の検索に失敗しました")
 	}
 
 	switch reservation.Status {
 	case "rejected":
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "何らかの理由により予約はRejected状態です")
+		errorResponse(r, w, http.StatusInternalServerError, "何らかの理由により予約はRejected状態です")
 		return
 	case "done":
 		// 支払いをキャンセルする
-		if true {
+		if false {
 			payInfo := CancelPaymentInformationRequest{reservation.PaymentId}
 			j, err := json.Marshal(payInfo)
 			if err != nil {
 				tx.Rollback()
-				errorResponse(w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "JSON Marshalに失敗しました")
 				log.Println(err.Error())
 				return
 			}
@@ -1986,15 +1987,15 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			req, err := http.NewRequestWithContext(r.Context(), "DELETE", payment_api+"/payment/"+reservation.PaymentId, bytes.NewBuffer(j))
 			if err != nil {
 				tx.Rollback()
-				errorResponse(w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "HTTPリクエストの作成に失敗しました")
 				log.Println(err.Error())
 				return
 			}
 			resp, err := client.Do(req)
 			if err != nil {
 				tx.Rollback()
-				errorResponse(w, resp.StatusCode, "HTTP DELETEに失敗しました")
-				log.Println(err.Error())
+				errorResponse(r, w, http.StatusInternalServerError, "HTTP DELETEに失敗しました")
+				log.Println(err)
 				return
 			}
 			defer resp.Body.Close()
@@ -2002,7 +2003,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			// リクエスト失敗
 			if resp.StatusCode != http.StatusOK {
 				tx.Rollback()
-				errorResponse(w, http.StatusInternalServerError, "決済のキャンセルに失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "決済のキャンセルに失敗しました")
 				log.Println(resp.StatusCode)
 				return
 			}
@@ -2010,7 +2011,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
 				tx.Rollback()
-				errorResponse(w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "レスポンスの読み込みに失敗しました")
 				log.Println(err.Error())
 				return
 			}
@@ -2019,13 +2020,14 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 			output := CancelPaymentInformationResponse{}
 			err = json.Unmarshal(body, &output)
 			if err != nil {
-				errorResponse(w, http.StatusInternalServerError, "JSON parseに失敗しました")
+				errorResponse(r, w, http.StatusInternalServerError, "JSON parseに失敗しました")
 				log.Println(err.Error())
 				return
 			}
 			log.Println(output)
 		} else {
-			batchedCancel(reservation.ReservationId)
+			cancelBuf <- reservation.PaymentId
+			//batchedCancel(reservation.ReservationId)
 		}
 	default:
 		// pass(requesting状態のものはpayment_id無いので叩かない)
@@ -2035,7 +2037,7 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.Exec(query, itemID, user.ID)
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, err.Error())
+		errorResponse(r, w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -2043,13 +2045,13 @@ func userReservationCancelHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.Exec(query, itemID)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, "seat naiyo")
-		// errorResponse(w, http.Status, "authentication failed")
+		errorResponse(r, w, http.StatusInternalServerError, "seat naiyo")
+		// errorResponse(r, w, http.Status, "authentication failed")
 		return
 	}
 	if err != nil {
 		tx.Rollback()
-		errorResponse(w, http.StatusInternalServerError, err.Error())
+		errorResponse(r, w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -2070,7 +2072,6 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	dbx.Exec("TRUNCATE users")
 
 	initReservationCache()
-	xxx = 0
 
 	// TODO: 最後に外す
 	//log.Println("initialize profiler")
@@ -2141,6 +2142,7 @@ func main() {
 		port,
 		dbname,
 	)
+	log.Printf("DSN: %q", dsn)
 
 	dbx, err = sqlx.Open("mysql", dsn)
 	if err != nil {
@@ -2187,6 +2189,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/api/user/reservations/:item_id"), userReservationResponseHandler)
 	mux.HandleFunc(pat.Post("/api/user/reservations/:item_id/cancel"), userReservationCancelHandler)
 
+	go batchedCancelWorker()
 	//log.Println(banner)
 	err = http.ListenAndServe(":8000", mux)
 
