@@ -276,10 +276,6 @@ var (
 	store sessions.Store = sessions.NewCookieStore([]byte(secureRandomStr(20)))
 )
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello, World")
-}
-
 func messageResponse(w http.ResponseWriter, message string) {
 	e := map[string]interface{}{
 		"is_error": false,
@@ -2131,7 +2127,6 @@ func main() {
 	initReservationCache()
 
 	// HTTP
-
 	mux := goji.NewMux()
 
 	mux.HandleFunc(pat.Post("/initialize"), initializeHandler)
