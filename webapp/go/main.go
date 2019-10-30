@@ -799,6 +799,7 @@ func trainSeatsHandler(w http.ResponseWriter, r *http.Request) {
 SELECT s.*
 FROM seat_reservations s, reservations r
 WHERE
+    s.reservation_id=r.reservation_id AND
 	r.date=? AND r.train_class=? AND r.train_name=? AND car_number=? AND seat_row=? AND seat_column=?
 `
 
@@ -1074,7 +1075,7 @@ func trainReservationHandler(w http.ResponseWriter, r *http.Request) {
 			for _, seat := range seatList {
 				s := SeatInformation{seat.SeatRow, seat.SeatColumn, seat.SeatClass, seat.IsSmokingSeat, false}
 				seatReservationList := []SeatReservation{}
-				query = "SELECT s.* FROM seat_reservations s, reservations r WHERE r.date=? AND r.train_class=? AND r.train_name=? AND car_number=? AND seat_row=? AND seat_column=?"
+				query = "SELECT s.* FROM seat_reservations s, reservations r WHERE r.reservation_id = s.reservation_id AND r.date=? AND r.train_class=? AND r.train_name=? AND car_number=? AND seat_row=? AND seat_column=?"
 				err = dbx.SelectContext(r.Context(),
 					&seatReservationList, query,
 					date.Format("2006/01/02"),
